@@ -41,8 +41,15 @@ _NO_RULE_REPLY = (
 
 @app.get("/healthz")
 def healthz() -> dict:
+    """健康檢查，順便回報設定狀態，方便遠端診斷。只回布林值與數量，不外洩任何值。"""
     missing = config.check_config()
-    return {"ok": not missing, "missing_env": missing}
+    return {
+        "ok": not missing,
+        "missing_env": missing,
+        "llm": config.LLM_ENABLED,  # False = 純規則模式，不花 API 錢
+        "allowed_users": len(config.ALLOWED_USER_IDS),
+        "model": config.CLAUDE_MODEL if config.LLM_ENABLED else None,
+    }
 
 
 # --- Webhook ---
