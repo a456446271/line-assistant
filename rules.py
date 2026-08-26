@@ -67,6 +67,13 @@ _ASK_FREE = ("有空", "空檔", "有沒有空", "空的")
 
 _ITEM = r"[^\d\n]{1,20}"
 _AMOUNT = r"\d{1,7}"
+
+# 「娛樂 PS5 3000」——開頭直接講分類，就不必靠關鍵字猜。
+# 項目允許含數字（PS5、iPhone 16、7-11），金額取結尾那串數字。
+_RE_EXPENSE_CATEGORY = re.compile(
+    r"^\s*(?P<category>" + "|".join(re.escape(c) for c in config.CATEGORIES) + r")"
+    r"\s*(?:(?P<item>\S.*?)\s+)?(?P<amount>\d{1,7})\s*(元|塊)?\s*$"
+)
 # 「午餐 120」「星巴克85元」
 _RE_EXPENSE_TAIL = re.compile(rf"^\s*(?P<item>{_ITEM}?)\s*(?P<amount>{_AMOUNT})\s*(元|塊)?\s*$")
 # 「120 午餐」
@@ -155,12 +162,44 @@ def _clean_title(text: str) -> str:
 # --- 各條規則 ---
 
 
-def _match_expense_add(text: str) -> AgentResult | None:
-    """「午餐 120」這種一句話記帳。"""
+def _looks_like_expense(text: str) -> bool:
+    """排除明顯在講行程的句子，避免把行程誤記成一筆消費。"""
+    if any(word in text for word in _CALENDAR_WORDS):
+        return False
+    return not any(ch in text for ch in ("/", ":", "：", "月", "日"))
+
+
+def _match_expense_with_category(text: str) -> AgentResult | None:
+    """「娛樂 PS5 3000」——自己指定分類，項目照樣記下來。
+
+    關鍵字表猜不到的東西（PS5、某個課程名）用這個語法就能記，
+    是純規則模式下的逃生門。
+    """
     stripped = text.strip()
-    if any(word in stripped for word in _CALENDAR_WORDS):
+    if not _looks_like_expense(stripped):
         return None
-    if any(ch in stripped for ch in ("/", ":", "：", "月", "日")):
+
+    match = _RE_EXPENSE_CATEGORY.match(stripped)
+    if not match:
+        return None
+
+    category = match.group("category")
+    # 只講「娛樂 3000」沒講買什麼，就拿分類名當項目
+    item = (match.group("item") or category).strip()
+
+    result = expense_api.add_expense(
+        float(match.group("amount")), category, item, _now().date().isoformat()
+    )
+    return AgentResult(
+        text=f"已記錄 {result['item']} {_money(result['amount'])}（{result['category']}）",
+        created_expense=result,
+    )
+
+
+def _match_expense_add(text: str) -> AgentResult | None:
+    """「午餐 120」這種一句話記帳，靠關鍵字猜分類。"""
+    stripped = text.strip()
+    if not _looks_like_expense(stripped):
         return None
 
     match = _RE_EXPENSE_TAIL.match(stripped) or _RE_EXPENSE_HEAD.match(stripped)
@@ -333,6 +372,9 @@ def _match_create_event(text: str) -> AgentResult | None:
 
 # 順序有意義：越明確的規則越前面，最寬鬆的新增行程放最後
 _RULES = (
+    # 指定分類的要排在關鍵字猜測前面，否則「餐飲 午餐 120」的項目
+    # 會變成「餐飲 午餐」
+    _match_expense_with_category,
     _match_expense_add,
     _match_budget,
     _match_expense_query,
