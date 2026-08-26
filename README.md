@@ -58,7 +58,7 @@
    ```bash
    python scripts/get_google_token.py
    ```
-   瀏覽器會開啟，登入**步驟 1 用的那個 Google 帳號**並授權，終端機會印出 refresh token，貼到 `.env` 的 `GOOGLE_REFRESH_TOKEN`
+   瀏覽器會開啟，登入**步驟 1 用的那個 Google 帳號**並授權。拿到的 refresh token 會直接寫回 `.env`，不會顯示在畫面上（印在終端機會留在捲動記錄裡）。
 
 ### 3. Notion：建立記帳資料庫
 
