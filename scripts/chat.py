@@ -18,11 +18,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import agent
 import calendar_api
 import config
+import rules
 
 
 def ask(text: str) -> None:
-    result = agent.run(text)
-    print(f"\n助理：{result.text}\n")
+    result = rules.try_handle(text)
+    source = "規則"
+    if result is None:
+        source = "Claude"
+        result = agent.run(text)
+    print(f"\n助理（{source}）：{result.text}\n")
 
     if result.created_expense:
         print(f"[已寫入 Notion] page_id={result.created_expense['page_id']}")

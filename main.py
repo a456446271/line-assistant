@@ -19,6 +19,7 @@ import config
 import expense_api
 import line_api
 import pending
+import rules
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("line-assistant")
@@ -75,9 +76,14 @@ def _describe(start_iso: str, end_iso: str) -> str:
 def _handle_text(user_id: str, reply_token: str, user_text: str) -> None:
     line_api.show_loading(user_id)
     try:
-        result = agent.run(user_text)
+        # 常見句型先讓規則層接，接不住才花錢叫 Claude。
+        result = rules.try_handle(user_text)
+        if result is None:
+            result = agent.run(user_text)
+        else:
+            logger.info("由規則層處理")
     except Exception:
-        logger.exception("agent 執行失敗")
+        logger.exception("處理訊息失敗")
         line_api.reply(reply_token, [line_api.text(_ERROR_REPLY)])
         return
 
