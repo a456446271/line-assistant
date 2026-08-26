@@ -130,19 +130,20 @@ uvicorn main:app --reload
 
 ---
 
-## 部署
+## 部署到 Render
 
-推薦 **Render**（免費方案就夠）：
+專案內附 `render.yaml`，Render 會自動帶好建置與啟動指令，不用手動填。
 
-1. 把這個資料夾推到 GitHub
-2. Render → New → Web Service → 連結該 repo
-3. Build Command：`pip install -r requirements.txt`
-4. Start Command：`uvicorn main:app --host 0.0.0.0 --port $PORT`
-5. Environment 分頁把 `.env` 裡的每個變數都加進去
-6. 部署完拿到的網址 + `/webhook` 填回 LINE Developers Console
+1. **確認程式碼已推到 GitHub**（`git push`）
+2. Render → **New** → **Blueprint** → 選這個 repo → Render 會讀到 `render.yaml`
+3. 它會列出所有標記 `sync: false` 的環境變數要你填值。**最快的做法是把本機 `.env` 裡對應的值複製過去**（Render 的環境變數頁面支援直接貼上 `.env` 格式的整段內容）
+   - `ANTHROPIC_API_KEY` 想維持純規則模式（NT$0）就留空
+4. 部署完成後會拿到一個 `https://xxx.onrender.com` 的固定網址
+5. 把 **LINE 的 webhook 網址改成** `https://xxx.onrender.com/webhook`
+   （LINE Developers Console → 你的頻道 → Messaging API 分頁 → Webhook settings）
 
 > **免費方案會休眠**：閒置 15 分鐘後服務會睡著，下次喚醒要 30-50 秒，第一則訊息會明顯卡住。
-> 解法是到 https://cron-job.org 設一個每 10 分鐘打 `https://你的網址/healthz` 的任務保活。
+> 解法是到 https://cron-job.org 設一個每 10 分鐘打 `https://xxx.onrender.com/healthz` 的任務保活。
 > 不想處理這件事的話可以改用 Fly.io（不休眠，但要綁信用卡）。
 
 ### 排程
@@ -158,6 +159,17 @@ POST /cron?key=<CRON_SECRET>&job=monthly   # 上個月的消費月報
 專案內附 `.github/workflows/cron.yml`，用 GitHub Actions 免費跑。要用的話在 repo 的 Settings → Secrets 加上 `APP_BASE_URL`（你的服務網址，結尾不要斜線）和 `CRON_SECRET`。
 
 GitHub Actions 的排程常有 5-20 分鐘延遲，在意早報準時的話改用 cron-job.org 打同一個網址會比較準。
+
+### 本機測試用的臨時網址
+
+不想部署、只想在自己電腦上跑的話，用 cloudflared 開一個臨時隧道：
+
+```bash
+winget install --id Cloudflare.cloudflared
+cloudflared tunnel --url http://127.0.0.1:8000
+```
+
+它會給一個 `https://xxx.trycloudflare.com` 網址，把 `網址/webhook` 填進 LINE 即可。不用註冊帳號，但電腦或隧道一關就失效。
 
 ---
 

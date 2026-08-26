@@ -1,0 +1,50 @@
+services:
+  - type: web
+    name: line-assistant
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      # sync: false 代表值不寫進這個檔案，要在 Render 的網頁上填。
+      # 這些是機密，絕對不能提交進 git。
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: ALLOWED_USER_IDS
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REFRESH_TOKEN
+        sync: false
+      - key: NOTION_TOKEN
+        sync: false
+      - key: NOTION_EXPENSE_DB_ID
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+      # 選填。留空即純規則模式，完全不呼叫 Claude API。
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+      # 以下不是機密，直接寫在這裡
+      - key: GOOGLE_CALENDAR_ID
+        value: primary
+      - key: CLAUDE_MODEL
+        value: claude-opus-5
+      - key: CLAUDE_EFFORT
+        value: low
+      - key: BUDGET_JSON
+        value: '{"餐飲":8000,"交通":2000,"購物":3000,"娛樂":2000,"居家":3000,"醫療":1000,"其他":2000}'
+      - key: BUDGET_ALERT_RATIO
+        value: "0.8"
+      - key: TIMEZONE
+        value: Asia/Taipei
+      - key: WORK_START_HOUR
+        value: "9"
+      - key: WORK_END_HOUR
+        value: "21"
