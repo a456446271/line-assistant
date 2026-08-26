@@ -23,6 +23,10 @@ ANTHROPIC_API_KEY = _get("ANTHROPIC_API_KEY")
 CLAUDE_MODEL = _get("CLAUDE_MODEL", "claude-opus-5")
 CLAUDE_EFFORT = _get("CLAUDE_EFFORT", "low")
 
+# Claude 是選填的兜底。留空就是純規則模式，完全不花 API 的錢，
+# 代價是規則接不住的句子會回一句提示而不是想辦法理解。
+LLM_ENABLED = bool(ANTHROPIC_API_KEY)
+
 # --- LINE ---
 LINE_CHANNEL_SECRET = _get("LINE_CHANNEL_SECRET")
 LINE_CHANNEL_ACCESS_TOKEN = _get("LINE_CHANNEL_ACCESS_TOKEN")
@@ -61,7 +65,6 @@ WORK_END_HOUR = int(_get("WORK_END_HOUR", "21"))
 
 
 _REQUIRED = [
-    "ANTHROPIC_API_KEY",
     "LINE_CHANNEL_SECRET",
     "LINE_CHANNEL_ACCESS_TOKEN",
     "GOOGLE_CLIENT_ID",

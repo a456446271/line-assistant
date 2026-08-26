@@ -25,8 +25,12 @@ def ask(text: str) -> None:
     result = rules.try_handle(text)
     source = "規則"
     if result is None:
-        source = "Claude"
-        result = agent.run(text)
+        if config.LLM_ENABLED:
+            source = "Claude"
+            result = agent.run(text)
+        else:
+            source = "接不住"
+            result = agent.AgentResult(text="這句規則接不住，且未設定 ANTHROPIC_API_KEY。")
     print(f"\n助理（{source}）：{result.text}\n")
 
     if result.created_expense:

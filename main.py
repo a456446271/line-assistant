@@ -28,6 +28,16 @@ app = FastAPI(title="LINE 個人助理")
 
 _ERROR_REPLY = "抱歉，剛剛出了點狀況，再說一次好嗎？"
 
+# 純規則模式（沒設 ANTHROPIC_API_KEY）下，規則接不住時的回覆
+_NO_RULE_REPLY = (
+    "這句我看不懂。可以試試這些講法：\n"
+    "・記帳：午餐 120\n"
+    "・查行程：今天有什麼安排\n"
+    "・加行程：明天下午三點開會\n"
+    "・查空檔：明天下午有空嗎\n"
+    "・查消費：這個月花多少"
+)
+
 
 @app.get("/healthz")
 def healthz() -> dict:
@@ -78,10 +88,13 @@ def _handle_text(user_id: str, reply_token: str, user_text: str) -> None:
     try:
         # 常見句型先讓規則層接，接不住才花錢叫 Claude。
         result = rules.try_handle(user_text)
-        if result is None:
+        if result is not None:
+            logger.info("由規則層處理")
+        elif config.LLM_ENABLED:
             result = agent.run(user_text)
         else:
-            logger.info("由規則層處理")
+            logger.info("規則接不住，且未啟用 Claude")
+            result = agent.AgentResult(text=_NO_RULE_REPLY)
     except Exception:
         logger.exception("處理訊息失敗")
         line_api.reply(reply_token, [line_api.text(_ERROR_REPLY)])
@@ -169,10 +182,15 @@ def _job_daily() -> dict:
     if not events:
         body = "今天沒有安排的行程。"
     else:
-        listing = "\n".join(agent.fmt_event(event) for event in events)
-        body = agent.summarize(
-            "這是使用者今天的行程，請寫一段簡短的早安摘要（三到五行，口語一點，"
-            f"點出時間壓力或空檔）：\n{listing}"
+        listing = "\n".join(f"・{agent.fmt_event(event)}" for event in events)
+        # 沒啟用 Claude 就直接排版，早報本來也不一定要 AI 潤稿
+        body = (
+            agent.summarize(
+                "這是使用者今天的行程，請寫一段簡短的早安摘要（三到五行，口語一點，"
+                f"點出時間壓力或空檔）：\n{listing}"
+            )
+            if config.LLM_ENABLED
+            else f"今天有 {len(events)} 個行程：\n{listing}"
         )
 
     return {"job": "daily", "pushed_to": _push_all([line_api.text(f"早安！\n\n{body}")])}
@@ -197,13 +215,26 @@ def _job_monthly() -> dict:
         expense_api.query_expenses(prior_start, prior_end)
     )
 
-    body = agent.summarize(
-        "這是使用者的月度消費統計，請寫一段簡短的月報（分類佔比、與前一個月比較、"
-        "點出異常支出，五到八行）：\n"
-        f"{target_start:%Y年%m月}：{target}\n"
-        f"{prior_start:%Y年%m月}：{prior}\n"
-        f"每月預算：{config.BUDGETS}"
-    )
+    if config.LLM_ENABLED:
+        body = agent.summarize(
+            "這是使用者的月度消費統計，請寫一段簡短的月報（分類佔比、與前一個月比較、"
+            "點出異常支出，五到八行）：\n"
+            f"{target_start:%Y年%m月}：{target}\n"
+            f"{prior_start:%Y年%m月}：{prior}\n"
+            f"每月預算：{config.BUDGETS}"
+        )
+    else:
+        # 沒啟用 Claude 就直接列數字：各分類金額與跟上個月的增減
+        lines = []
+        for name in config.CATEGORIES:
+            amount = target.get(name, 0)
+            if not amount:
+                continue
+            diff = amount - prior.get(name, 0)
+            arrow = f"（較上月 {'+' if diff >= 0 else ''}${diff:,.0f}）" if diff else ""
+            lines.append(f"・{name} ${amount:,.0f}{arrow}")
+        total = sum(target.values())
+        body = f"總支出 ${total:,.0f}\n" + ("\n".join(lines) or "（沒有任何紀錄）")
     header = f"{target_start:%Y年%m月}消費月報\n\n"
     return {"job": "monthly", "pushed_to": _push_all([line_api.text(header + body)])}
 
