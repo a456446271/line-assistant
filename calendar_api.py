@@ -116,21 +116,37 @@ def create_event(
 
 
 def _busy_intervals(start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
-    result = (
+    """算出忙碌區間。
+
+    刻意不用 freeBusy API——它需要 calendar.readonly 以上的權限，
+    而我們只要 calendar.events。用 events.list 自己算，權限維持最小。
+
+    跳過標記為「有空」（transparent）的行程，以及整天行程——
+    生日、節日這種整天事件不該讓一整天都算忙。
+    """
+    events = (
         _service()
-        .freebusy()
-        .query(
-            body={
-                "timeMin": start.isoformat(),
-                "timeMax": end.isoformat(),
-                "timeZone": config.TIMEZONE,
-                "items": [{"id": config.GOOGLE_CALENDAR_ID}],
-            }
+        .events()
+        .list(
+            calendarId=config.GOOGLE_CALENDAR_ID,
+            timeMin=start.isoformat(),
+            timeMax=end.isoformat(),
+            singleEvents=True,
+            orderBy="startTime",
+            maxResults=250,
         )
         .execute()
+        .get("items", [])
     )
-    busy = result["calendars"][config.GOOGLE_CALENDAR_ID].get("busy", [])
-    return sorted((parse_dt(b["start"]), parse_dt(b["end"])) for b in busy)
+
+    intervals = []
+    for item in events:
+        if item.get("status") == "cancelled" or item.get("transparency") == "transparent":
+            continue
+        if "dateTime" not in item.get("start", {}):
+            continue
+        intervals.append((parse_dt(item["start"]["dateTime"]), parse_dt(item["end"]["dateTime"])))
+    return sorted(intervals)
 
 
 def find_free_slots(
