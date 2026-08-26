@@ -95,12 +95,24 @@ def create_event(
     end_iso: str,
     location: str = "",
     description: str = "",
+    all_day: bool = False,
 ) -> dict:
-    body = {
-        "summary": title,
-        "start": {"dateTime": parse_dt(start_iso).isoformat(), "timeZone": config.TIMEZONE},
-        "end": {"dateTime": parse_dt(end_iso).isoformat(), "timeZone": config.TIMEZONE},
-    }
+    if all_day:
+        # Google 的整天行程用 date 而非 dateTime，而且 end 是「不含」的，
+        # 所以單日行程的 end 要是隔天。
+        start_date = date.fromisoformat(start_iso[:10])
+        end_date = date.fromisoformat(end_iso[:10]) if end_iso else start_date
+        body = {
+            "summary": title,
+            "start": {"date": start_date.isoformat()},
+            "end": {"date": (end_date + timedelta(days=1)).isoformat()},
+        }
+    else:
+        body = {
+            "summary": title,
+            "start": {"dateTime": parse_dt(start_iso).isoformat(), "timeZone": config.TIMEZONE},
+            "end": {"dateTime": parse_dt(end_iso).isoformat(), "timeZone": config.TIMEZONE},
+        }
     if location:
         body["location"] = location
     if description:
