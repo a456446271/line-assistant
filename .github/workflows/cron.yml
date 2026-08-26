@@ -1,0 +1,37 @@
+name: 排程推播
+
+# GitHub 的 cron 用 UTC。台北時間 = UTC + 8。
+# 注意：GitHub Actions 的排程常有 5-20 分鐘延遲，對準時性要求高的話
+# 改用 cron-job.org 打同一個網址會比較準。
+on:
+  schedule:
+    - cron: "0 0 * * *"   # 每天 08:00（台北）：早報
+    - cron: "0 13 * * *"  # 每天 21:00（台北）：預算檢查（只有超標才推播）
+    - cron: "30 0 1 * *"  # 每月 1 號 08:30（台北）：上個月的消費月報
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 要手動觸發的 job
+        required: true
+        default: daily
+        type: choice
+        options: [daily, budget, monthly]
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 決定要跑哪個 job
+        id: pick
+        run: |
+          case "${{ github.event.schedule }}" in
+            "0 0 * * *")   echo "job=daily"   >> "$GITHUB_OUTPUT" ;;
+            "0 13 * * *")  echo "job=budget"  >> "$GITHUB_OUTPUT" ;;
+            "30 0 1 * *")  echo "job=monthly" >> "$GITHUB_OUTPUT" ;;
+            *)             echo "job=${{ inputs.job }}" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: 呼叫排程端點
+        run: |
+          curl -sS -f -X POST \
+            "${{ secrets.APP_BASE_URL }}/cron?key=${{ secrets.CRON_SECRET }}&job=${{ steps.pick.outputs.job }}"

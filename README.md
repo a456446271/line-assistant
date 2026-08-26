@@ -1,0 +1,186 @@
+# LINE 個人助理（行事曆 + 記帳）
+
+在 LINE 上用講的查行程、加行程、記帳。行程資料放 Google Calendar（會同步到 iPhone 原生行事曆 App），記帳資料放 Notion。
+
+```
+你：今天有什麼安排
+助理：今天三件事——
+     ・10:00 跟設計師對稿
+     ・14:00-15:30 客戶提案
+     ・19:00 晚餐聚會
+     下午提案完到晚餐中間有三個半小時空檔。
+
+你：下週二下午三點跟客戶開會
+助理：[卡片] 要加入行事曆嗎？
+     時間 2026/09/01(二) 15:00-16:00
+     項目 跟客戶開會
+     [取消] [確認新增]
+
+你：午餐 120
+助理：已記錄 午餐 $120（餐飲）
+     [撤銷這筆]
+```
+
+另外每天早上會推播當日行程摘要，每月 1 號推播上個月的消費月報，分類快超支時會提醒。
+
+---
+
+## 先搞清楚兩件事
+
+1. **LINE Notify 已於 2025-03-31 終止服務**。網路上很多教學還在教 LINE Notify，那些都不能用了，本專案用的是 LINE Messaging API。
+2. **費用**：LINE 官方帳號輕用量方案 0 元，每月 200 則免費**推播**額度。你傳訊息、bot 回覆你（reply）**完全不計費**，只有 bot 主動推播才算則數。本專案的排程一個月大約用掉 35-45 則，很寬裕。
+
+---
+
+## 設定步驟
+
+依序做完這四步，缺一不可。
+
+### 1. iPhone：把行事曆接上 Google
+
+設定 →「應用程式」→「行事曆」→「行事曆帳號」→「加入帳號」→ Google → 登入。
+
+加完之後，**務必把預設行事曆改成 Google 那本**（設定 → 行事曆 → 預設行事曆）。不改的話，你在手機上隨手新增的行程會存進 iCloud，這個 bot 讀不到。
+
+設好之後 Google Calendar 的行程會顯示在 iPhone 原生行事曆 App 裡，雙向同步，手機端的使用習慣完全不用改。
+
+### 2. Google Cloud：開 Calendar API 並取得憑證
+
+1. 到 https://console.cloud.google.com 建立一個新專案
+2. 「API 和服務」→「已啟用的 API」→ 搜尋並啟用 **Google Calendar API**
+3. 「API 和服務」→「OAuth 同意畫面」→ 使用者類型選「外部」，填基本資料
+4. **重要：把應用程式「發布為正式版」**
+   > 如果停在「測試中」狀態，發出的 refresh token **七天就會失效**，bot 會每週壞一次。
+   > 個人使用不需要通過 Google 驗證，發布後登入時會出現「此應用程式未經 Google 驗證」的警告畫面，點「進階」→「繼續前往」就好。
+5. 「憑證」→「建立憑證」→「OAuth 用戶端 ID」→ 應用程式類型選 **電腦版應用程式**
+6. 拿到 `Client ID` 與 `Client secret`，填進 `.env`
+7. 執行下面這個腳本取得 refresh token：
+   ```bash
+   python scripts/get_google_token.py
+   ```
+   瀏覽器會開啟，登入**步驟 1 用的那個 Google 帳號**並授權，終端機會印出 refresh token，貼到 `.env` 的 `GOOGLE_REFRESH_TOKEN`
+
+### 3. Notion：建立記帳資料庫
+
+1. 到 https://www.notion.so/my-integrations 建立一個 **internal integration**，複製它的 secret 填進 `.env` 的 `NOTION_TOKEN`
+2. 在 Notion 裡建立一個資料庫，欄位如下（**名稱要完全一樣**）：
+
+   | 欄位 | 型別 | 說明 |
+   |---|---|---|
+   | 項目 | Title | 消費項目 |
+   | 金額 | Number | 新台幣 |
+   | 分類 | Select | 選項要和 `.env` 的 `BUDGET_JSON` 的 key 完全一致 |
+   | 日期 | Date | |
+   | 來源 | Select | 加一個選項「LINE」 |
+
+3. 在資料庫頁面右上角「⋯」→「連線」→ 把剛剛建的 integration 加進去（**這步沒做的話 API 會回 404**）
+4. 複製資料庫網址中的 32 碼 id 填進 `.env` 的 `NOTION_EXPENSE_DB_ID`
+   ```
+   https://www.notion.so/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx?v=...
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ 這段
+   ```
+
+### 4. LINE：建立 Messaging API channel
+
+1. 到 https://developers.line.biz/console/ 登入，建立一個 Provider
+2. 在該 Provider 下建立 **Messaging API** channel
+3. 「Basic settings」分頁 → 複製 **Channel secret** 填進 `.env`
+4. 「Messaging API」分頁 → 最下方 **Channel access token（long-lived）** → 按 Issue → 複製填進 `.env`
+5. 同一頁把 **自動回應訊息** 和 **歡迎訊息** 都關掉（不關的話 bot 會多回一堆罐頭訊息）
+6. 用手機掃該頁的 QR code 加自己的 bot 好友
+7. `ALLOWED_USER_IDS` 先留空，等服務跑起來、你傳第一則訊息後，終端機的 log 會印出 `user_id=Uxxxxx`，把它填進 `.env` 再重啟
+
+> `ALLOWED_USER_IDS` 是白名單。留空的話任何加你 bot 好友的人都能用，會消耗你的 Claude API 額度，設定完務必填上。
+
+---
+
+## 本機跑起來
+
+```bash
+cd line-assistant
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env      # 然後把上面拿到的值填進去
+```
+
+### 先在終端機測，不用碰 LINE
+
+```bash
+python scripts/chat.py
+```
+
+行事曆與記帳的邏輯可以在這裡快速反覆調整，不用每次都繞一圈 webhook。建議依序試這幾句：
+
+- `今天有什麼安排`
+- `這禮拜三下午有空嗎`
+- `下週二下午三點跟客戶開會` → 應該印出「待確認行程」而不是直接建立
+- `午餐 120` → 去 Notion 確認欄位對不對
+- `這個月花多少`
+
+### 接上 LINE
+
+```bash
+uvicorn main:app --reload
+```
+
+另開一個終端機跑 `ngrok http 8000`，把 ngrok 給的 https 網址加上 `/webhook`（例如 `https://xxxx.ngrok-free.app/webhook`）填進 LINE Developers Console 的 Webhook URL，按 **Verify** 應該顯示 Success，並把 **Use webhook** 打開。
+
+然後用手機傳訊息測試。
+
+---
+
+## 部署
+
+推薦 **Render**（免費方案就夠）：
+
+1. 把這個資料夾推到 GitHub
+2. Render → New → Web Service → 連結該 repo
+3. Build Command：`pip install -r requirements.txt`
+4. Start Command：`uvicorn main:app --host 0.0.0.0 --port $PORT`
+5. Environment 分頁把 `.env` 裡的每個變數都加進去
+6. 部署完拿到的網址 + `/webhook` 填回 LINE Developers Console
+
+> **免費方案會休眠**：閒置 15 分鐘後服務會睡著，下次喚醒要 30-50 秒，第一則訊息會明顯卡住。
+> 解法是到 https://cron-job.org 設一個每 10 分鐘打 `https://你的網址/healthz` 的任務保活。
+> 不想處理這件事的話可以改用 Fly.io（不休眠，但要綁信用卡）。
+
+### 排程
+
+排程做成一個帶密鑰的 HTTP 端點，由外部服務定時打進來：
+
+```
+POST /cron?key=<CRON_SECRET>&job=daily     # 每日早報
+POST /cron?key=<CRON_SECRET>&job=budget    # 預算檢查（只有超標才推播）
+POST /cron?key=<CRON_SECRET>&job=monthly   # 上個月的消費月報
+```
+
+專案內附 `.github/workflows/cron.yml`，用 GitHub Actions 免費跑。要用的話在 repo 的 Settings → Secrets 加上 `APP_BASE_URL`（你的服務網址，結尾不要斜線）和 `CRON_SECRET`。
+
+GitHub Actions 的排程常有 5-20 分鐘延遲，在意早報準時的話改用 cron-job.org 打同一個網址會比較準。
+
+---
+
+## 費用
+
+| 項目 | 費用 |
+|---|---|
+| LINE 官方帳號 | 0 元（輕用量，每月 200 則推播） |
+| Render 免費方案 | 0 元 |
+| Notion | 0 元 |
+| Claude API | 約 NT$150-300 / 月 |
+
+Claude 的部分預設用 `claude-opus-5`（$5 / $25 per MTok），一則對話大約 NT$0.9。想壓低的話把 `.env` 的 `CLAUDE_MODEL` 改成 `claude-sonnet-5`（$2 / $10），約降到四成。
+
+---
+
+## 已知限制
+
+- **不記得上一句話**。每則訊息都是獨立處理的，所以「那改到四點」這種接續指令不會work，要重講完整的一句。要多輪對話的話得在 `main.py` 加上每個使用者的短期歷史。
+- **確認卡片存在記憶體**。服務重啟（Render 部署或休眠喚醒）後，還沒按的卡片會失效，按下去會回「已過期，請再說一次」。
+- **只讀寫一本行事曆**（`GOOGLE_CALENDAR_ID`，預設 `primary`）。
+- Claude 若因安全機制拒絕回應，bot 會回一句制式訊息。沒有啟用 server-side fallback，個人行事曆場景幾乎不會遇到。
+
+## 之後可以加的
+
+行程前 N 分鐘提醒、每週日晚上下週行程總覽、傳活動海報截圖讓 Claude 解析後建行程、結合天氣與通勤時間、iOS 提醒事項整合。
