@@ -1,37 +1,58 @@
-name: 排程推播
+name: 保活救援
 
-# GitHub 的 cron 用 UTC。台北時間 = UTC + 8。
-# 注意：GitHub Actions 的排程常有 5-20 分鐘延遲，對準時性要求高的話
-# 改用 cron-job.org 打同一個網址會比較準。
+# 為什麼需要這個？
+#
+# Render 免費方案的冷啟動實測要 42 秒，而 cron-job.org 免費方案的請求逾時
+# 固定是 30 秒且不能調。也就是說服務一旦睡著，cron-job.org 的每一次保活
+# ping 都必然逾時被判定失敗——它能防止睡著，卻永遠救不回已經睡著的服務。
+# 連續失敗 25 次後 cron-job.org 還會自動停用該任務，服務就永遠睡死了。
+#
+# GitHub Actions 的 curl 沒有這個限制，可以等滿 120 秒。所以這裡每小時打
+# 一次，當作救援機制：就算真的睡著，最多一小時內會被完整喚醒。
+#
+# 日常保活仍然由 cron-job.org 每 5 分鐘負責（GitHub Actions 的排程常延遲
+# 5-20 分鐘，撐不住 Render 15 分鐘的休眠窗口）。
+#
+# 注意：早報／預算／月報三個排程也在 cron-job.org 上跑，這裡刻意不排它們，
+# 否則會重複推播。需要手動觸發時用下面的 workflow_dispatch。
+
 on:
   schedule:
-    - cron: "0 0 * * *"   # 每天 08:00（台北）：早報
-    - cron: "0 13 * * *"  # 每天 21:00（台北）：預算檢查（只有超標才推播）
-    - cron: "30 0 1 * *"  # 每月 1 號 08:30（台北）：上個月的消費月報
+    - cron: "0 * * * *" # 每小時整點：救援 ping
   workflow_dispatch:
     inputs:
-      job:
-        description: 要手動觸發的 job
+      task:
+        description: 要手動執行的工作
         required: true
-        default: daily
+        default: keepalive
         type: choice
-        options: [daily, budget, monthly]
+        options: [keepalive, daily, budget, monthly]
 
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: 決定要跑哪個 job
+      - name: 決定要執行什麼
         id: pick
         run: |
-          case "${{ github.event.schedule }}" in
-            "0 0 * * *")   echo "job=daily"   >> "$GITHUB_OUTPUT" ;;
-            "0 13 * * *")  echo "job=budget"  >> "$GITHUB_OUTPUT" ;;
-            "30 0 1 * *")  echo "job=monthly" >> "$GITHUB_OUTPUT" ;;
-            *)             echo "job=${{ inputs.job }}" >> "$GITHUB_OUTPUT" ;;
-          esac
+          if [ -n "${{ github.event.schedule }}" ]; then
+            echo "task=keepalive" >> "$GITHUB_OUTPUT"
+          else
+            echo "task=${{ inputs.task }}" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: 呼叫排程端點
+      - name: 救援 ping
+        if: steps.pick.outputs.task == 'keepalive'
         run: |
-          curl -sS -f -X POST \
-            "${{ secrets.APP_BASE_URL }}/cron?key=${{ secrets.CRON_SECRET }}&job=${{ steps.pick.outputs.job }}"
+          # 等到 120 秒，足以撐過 Render 的冷啟動。
+          # 服務原本就醒著的話這裡不到一秒就回來。
+          start=$(date +%s)
+          curl -sS -f --max-time 120 "${{ secrets.APP_BASE_URL }}/healthz"
+          echo ""
+          echo "耗時 $(( $(date +%s) - start )) 秒（超過 30 秒代表服務原本是睡著的）"
+
+      - name: 手動觸發排程工作
+        if: steps.pick.outputs.task != 'keepalive'
+        run: |
+          curl -sS -f --max-time 120 -X POST \
+            "${{ secrets.APP_BASE_URL }}/cron?key=${{ secrets.CRON_SECRET }}&job=${{ steps.pick.outputs.task }}"

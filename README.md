@@ -142,23 +142,39 @@ uvicorn main:app --reload
 5. 把 **LINE 的 webhook 網址改成** `https://xxx.onrender.com/webhook`
    （LINE Developers Console → 你的頻道 → Messaging API 分頁 → Webhook settings）
 
-> **免費方案會休眠**：閒置 15 分鐘後服務會睡著，下次喚醒要 30-50 秒，第一則訊息會明顯卡住。
-> 解法是到 https://cron-job.org 設一個每 10 分鐘打 `https://xxx.onrender.com/healthz` 的任務保活。
-> 不想處理這件事的話可以改用 Fly.io（不休眠，但要綁信用卡）。
+### 保活（必做，而且不能只靠一個工具）
 
-### 排程
+Render 免費方案閒置 15 分鐘會休眠，**冷啟動實測要 42 秒**。這對 webhook 是致命的——LINE 等不到回應就放棄，那則訊息直接消失。
 
-排程做成一個帶密鑰的 HTTP 端點，由外部服務定時打進來：
+問題在於單一保活工具救不了：
+
+| | |
+|---|---|
+| Render 冷啟動 | 42 秒 |
+| cron-job.org 免費版請求逾時 | 30 秒（固定，不可調） |
+
+服務一旦睡著，cron-job.org 的每次 ping 都必然逾時失敗，而連續失敗 25 次後它會**自動停用該任務**，服務就永遠睡死。它能防止睡著，卻救不回睡著的。
+
+所以要兩層：
+
+1. **cron-job.org 每 5 分鐘**打 `/healthz` — 日常防止睡著
+2. **GitHub Actions 每小時**打 `/healthz`，逾時設 120 秒（`.github/workflows/cron.yml`）— 救援。GitHub 的 curl 沒有 30 秒限制，能等滿冷啟動，所以就算真的睡著，最多一小時內會被完整喚醒
+
+要啟用第 2 層，在 repo 的 Settings → Secrets and variables → Actions 加上 `APP_BASE_URL`（服務網址，結尾不要斜線）和 `CRON_SECRET`。
+
+> GitHub 會在 repo 連續 60 天沒有任何提交後自動停用排程 workflow，並寄信通知。長期不動這個專案的話要留意。
+
+### 排程推播
+
+三個排程也建在 cron-job.org 上（GitHub Actions 的排程常延遲 5-20 分鐘，早報會不準時）：
 
 ```
-POST /cron?key=<CRON_SECRET>&job=daily     # 每日早報
-POST /cron?key=<CRON_SECRET>&job=budget    # 預算檢查（只有超標才推播）
-POST /cron?key=<CRON_SECRET>&job=monthly   # 上個月的消費月報
+https://你的網址/cron?key=<CRON_SECRET>&job=daily     每天 08:00
+https://你的網址/cron?key=<CRON_SECRET>&job=budget    每天 21:00（只有超標才推播）
+https://你的網址/cron?key=<CRON_SECRET>&job=monthly   每月 1 號 08:30（上個月的月報）
 ```
 
-專案內附 `.github/workflows/cron.yml`，用 GitHub Actions 免費跑。要用的話在 repo 的 Settings → Secrets 加上 `APP_BASE_URL`（你的服務網址，結尾不要斜線）和 `CRON_SECRET`。
-
-GitHub Actions 的排程常有 5-20 分鐘延遲，在意早報準時的話改用 cron-job.org 打同一個網址會比較準。
+`cron.yml` 刻意**不排**這三個，否則會跟 cron-job.org 重複推播。需要手動測試時用該 workflow 的 workflow_dispatch。
 
 ### 本機測試用的臨時網址
 
