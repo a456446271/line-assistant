@@ -32,6 +32,14 @@ LINE_CHANNEL_SECRET = _get("LINE_CHANNEL_SECRET")
 LINE_CHANNEL_ACCESS_TOKEN = _get("LINE_CHANNEL_ACCESS_TOKEN")
 ALLOWED_USER_IDS = [uid for uid in _get("ALLOWED_USER_IDS").split(",") if uid.strip()]
 
+# --- LIFF（在 LINE 裡開的待辦網頁）---
+# 兩個都設了才會啟用。LINE_CHANNEL_ID 是驗證 ID token 用的 audience，
+# 沒有它就無法確認打進 /api 的人是誰，那等於把待辦清單公開在網路上。
+LIFF_ID = _get("LIFF_ID")
+LINE_CHANNEL_ID = _get("LINE_CHANNEL_ID")
+LIFF_ENABLED = bool(LIFF_ID and LINE_CHANNEL_ID)
+LIFF_URL = f"https://liff.line.me/{LIFF_ID}" if LIFF_ID else ""
+
 # --- Google Calendar ---
 GOOGLE_CLIENT_ID = _get("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = _get("GOOGLE_CLIENT_SECRET")
@@ -42,6 +50,10 @@ GOOGLE_SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 # --- Notion ---
 NOTION_TOKEN = _get("NOTION_TOKEN")
 NOTION_EXPENSE_DB_ID = _get("NOTION_EXPENSE_DB_ID")
+# 待辦與流程是選填的。沒設就當作沒有這個功能，相關規則直接跳過，
+# 其他功能照常運作。
+NOTION_TODO_DB_ID = _get("NOTION_TODO_DB_ID")
+NOTION_SOP_DB_ID = _get("NOTION_SOP_DB_ID")
 # 釘住這個版本：Notion 較新的 API 版本把 database_id 換成 data_source_id，
 # 釘版本可以避開那次改版。
 NOTION_VERSION = "2022-06-28"

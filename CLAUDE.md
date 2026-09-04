@@ -13,3 +13,17 @@
 - 規則層的原則是**寧可放過、不可誤判**。記帳規則誤判會直接寫進 Notion，所以句子裡有「開會、提醒、行程、預約、點」或日期符號時一律不當成記帳；猜不出分類時也交給 Claude，不要塞進「其他」。
 - **`ANTHROPIC_API_KEY` 是選填的**。`config.LLM_ENABLED` 為 False 時是純規則模式：規則接不住就回提示，早報與月報改成直接排版。任何新增的 Claude 呼叫都要先檢查 `config.LLM_ENABLED`，否則純規則模式會壞掉。
 - **中文日期時間解析在 `zh_datetime.py`**，跟業務邏輯分開，方便單獨測試。要支援新的時間講法改這裡，不要在 `rules.py` 裡另外寫日期解析。
+- **Notion 的 HTTP 底層集中在 `notion.py`**（標頭、版本、分頁、rich text 攤平）。`expense_api.py`／`todo_api.py`／`sop_api.py` 只管各自那張表的欄位與查詢，不要再各自寫 httpx。
+- **待辦用一張自己控制的乾淨表**，不接生活模板附的那種待辦庫（三十幾個欄位、公式、按鈕、重複性任務機制），綁上去只會讓模板一改版就壞掉。欄位名稱集中成 `todo_api.py` 最上面的 `PROP_*` 常數，改資料庫只改那裡。
+- **待辦清單過濾在 `todo_api._row()`**：沒標題的空白列不列，在 LINE 上既顯示不了也按不了。
+- **完成是打勾、刪除是封存**，兩者都不是真的刪。完成紀錄留著能回顧，封存三十天內能從 Notion 垃圾桶救回來。
+- **流程的步驟放頁面內容，不放欄位**。rich text 欄位有 2000 字上限，而且在 Notion 裡編一篇文件比編一格文字好用。讀取時 `sop_api._TEXT_BLOCKS` 刻意放寬，使用者用什麼排版都讀得到。
+- **`_match_todo_add` 必須排在記帳規則前面**。「待辦 咖啡豆 300」如果先給記帳規則看，會被記成一筆 300 元的餐飲支出。
+- **`_match_sop_query` 必須排在 `_match_calendar` 後面**。它的觸發詞含「怎麼」「要做什麼」，排前面的話「明天怎麼安排」會跑去找流程。也因為排在後面，觸發詞才能放寬。
+- 查流程沒命中時，只有句子明講「流程」「步驟」「SOP」才回「沒有這份流程」，否則回 `None`。不然「洗衣機壞了怎麼辦」會得到一句看似合理的廢話。
+- `NOTION_TODO_DB_ID` 與 `NOTION_SOP_DB_ID` 是選填的，用 `todo_api.enabled()`／`sop_api.enabled()` 判斷。新增相關程式碼都要先檢查，否則沒設的人會壞掉。agent 的工具清單也是照這個條件動態組的。
+- 加新的 Notion 資料庫時，**integration 的連線權限不會自己擴散**，每個資料庫都要在 Notion 頁面裡各自加一次，否則 404。`scripts/check_notion.py` 會逐一檢查並指出是哪一個。
+- **LIFF 的 `/api/*` 端點只靠 ID token 擋外人**。webhook 有 channel secret 的簽章，但 `/api` 是瀏覽器直接打的，沒有那層保護。`_liff_user()` 是唯一的門：驗 token → 比對 `ALLOWED_USER_IDS`。新增任何 `/api` 端點都要先呼叫它，漏掉等於把資料公開在網路上。
+- **驗 ID token 一定要帶 audience**（`client_id=LINE_CHANNEL_ID`），否則別的 channel 發的 token 也會通過。驗證送去 LINE 的 `/oauth2/v2.1/verify` 而不是自己解 JWT，簽章與有效期就不會自己實作錯。
+- `LIFF_ID` 與 `LINE_CHANNEL_ID` 少一個就整個停用（`config.LIFF_ENABLED` 為 False，端點回 404），不會半開著跑。
+- **Rich Menu 的圖不要用 ✓ ▤ 這類符號**，微軟正黑體沒有那些字形，會印成豆腐塊。`scripts/setup_richmenu.py` 改用色點。Pillow 只有那支腳本要用，不要加進 `requirements.txt`（Render 上永遠不會執行它）。

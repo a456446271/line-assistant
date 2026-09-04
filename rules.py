@@ -18,6 +18,8 @@ from datetime import date, datetime, time, timedelta
 import calendar_api
 import config
 import expense_api
+import sop_api
+import todo_api
 import zh_datetime
 from agent import AgentResult, _WEEKDAYS
 
@@ -81,6 +83,20 @@ _RE_EXPENSE_HEAD = re.compile(rf"^\s*(?P<amount>{_AMOUNT})\s*(元|塊)?\s*(?P<it
 
 # 標題前後常見的贅字
 _TITLE_NOISE = re.compile(r"^(的|要|去|跟|和|與|幫我|提醒我|我|記得|安排|新增|加|預約)+|(的)+$")
+
+# 「待辦 買牛奶」「記得繳電話費」——一定要有這些開頭才當成待辦。
+# 不用「有事要做」這種模糊講法，那跟查行程分不開。
+_RE_TODO_ADD = re.compile(
+    r"^\s*(?:待辦|代辦|todo|提醒我|記得)\s*[:：,，]?\s*(?P<body>\S.*)$", re.IGNORECASE
+)
+# 問待辦一樣只認明確的字眼。「今天要做什麼」留給查行程，那本來就比較像在問行程。
+_ASK_TODO = ("待辦", "代辦", "todo")
+
+# 「新增流程 收班流程」+ 換行後的步驟
+_RE_SOP_ADD = re.compile(r"^\s*(?:新增|建立|新|加|記錄?)?\s*流程\s*[:：]?\s*(?P<name>\S.*)$")
+# 放得比較寬，因為這條規則排在查行程後面，有日期的句子早就被接走了；
+# 而且沒命中任何流程時只會回 None，不會亂答。
+_ASK_SOP = ("流程", "sop", "步驟", "怎麼", "如何", "要做什麼", "該做什麼")
 
 
 def _now() -> datetime:
@@ -160,6 +176,133 @@ def _clean_title(text: str) -> str:
 
 
 # --- 各條規則 ---
+
+
+def _match_todo_add(text: str) -> AgentResult | None:
+    """「待辦 買牛奶」「記得下週三繳電話費」。
+
+    講了明確時間的一律不接——那是行程，該走行事曆的確認卡片。
+    只講到日期沒講時間的才留下來當期限，因為那種事情本來就排不進行事曆。
+    """
+    if not todo_api.enabled():
+        return None
+
+    match = _RE_TODO_ADD.match(text.strip())
+    if not match:
+        return None
+    body = match.group("body").strip()
+
+    parsed = zh_datetime.parse(body)
+    if parsed is not None and parsed.has_time:
+        return None
+
+    due = None
+    hit = zh_datetime.parse_date_only(body)
+    if hit:
+        due = hit[0]
+        body = zh_datetime.strip_spans(body, [hit[1]])
+
+    title = _clean_title(body)
+    if len(title) < 2:
+        return None
+
+    todo_api.add_todo(title, due)
+    when = f"（{due.month}/{due.day} 前）" if due else ""
+    return AgentResult(text=f"已加入待辦：{title}{when}")
+
+
+def _match_todo_query(text: str) -> AgentResult | None:
+    """「待辦」「有什麼待辦」「今天的待辦」。"""
+    if not todo_api.enabled():
+        return None
+    if not any(word in text.lower() for word in _ASK_TODO):
+        return None
+
+    rows = todo_api.open_todos()
+
+    # 「今天的待辦」只看今天以前到期的，其餘的問法給全部
+    period = _resolve_period(text)
+    label = "待辦事項"
+    if period is not None:
+        _, end_day, period_label = period
+        rows = [row for row in rows if row["due"] and row["due"] <= end_day]
+        label = f"{period_label}到期的待辦"
+
+    if not rows:
+        return AgentResult(text=f"沒有未完成的{label}。")
+    return AgentResult(text="", todo_list=rows)
+
+
+def _match_sop_add(text: str) -> AgentResult | None:
+    """第一行「新增流程 收班流程」，接下來每一行是一步。"""
+    if not sop_api.enabled():
+        return None
+
+    lines = [line for line in text.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return None
+
+    match = _RE_SOP_ADD.match(lines[0])
+    if not match:
+        return None
+    name = match.group("name").strip()
+    if len(name) < 2:
+        return None
+    if "流程" not in name and "SOP" not in name.upper():
+        name += "流程"
+
+    result = sop_api.add_sop(name, lines[1:])
+    if not result["count"]:
+        return None
+    return AgentResult(
+        text=f"已建立「{result['name']}」，共 {result['count']} 步。"
+        f"之後直接問我「{result['name']}」就會告訴你。"
+    )
+
+
+def _match_sop_query(text: str) -> AgentResult | None:
+    """「收班流程」「印保證卡流程」「怎麼收班」。
+
+    只有在句子明確提到流程／步驟／SOP 時才會回「找不到」；
+    像「如何」「怎麼做」這種泛用詞沒命中就直接放過，
+    否則會把根本不是在問流程的句子回一句看似合理的廢話。
+    """
+    if not sop_api.enabled():
+        return None
+
+    lowered = text.lower()
+    if not any(word in lowered for word in _ASK_SOP):
+        return None
+    if len(text.strip()) > 30 or "\n" in text:
+        return None
+
+    # 只打「流程」（Rich Menu 的按鈕就是送這兩個字）代表要看有哪些
+    if text.strip() in ("流程", "流程清單", "所有流程", "有哪些流程"):
+        names = [item["name"] for item in sop_api.list_sops()]
+        if not names:
+            return AgentResult(
+                text="還沒有任何流程。這樣加一份：\n\n流程 收班流程\n1. 結帳對帳\n2. 關展示機\n3. 鎖後門"
+            )
+        return AgentResult(
+            text="目前有這些流程：\n" + "\n".join(f"・{name}" for name in names) + "\n\n直接打名字就看得到步驟。"
+        )
+
+    sop = sop_api.find(text)
+    if sop is None:
+        explicit = "流程" in text or "步驟" in text or "sop" in lowered
+        names = "、".join(item["name"] for item in sop_api.list_sops())
+        if not explicit or not names:
+            return None
+        return AgentResult(text=f"沒有這份流程。目前有：{names}")
+
+    steps = sop_api.steps(sop["page_id"])
+    if not steps:
+        return AgentResult(
+            text=f"「{sop['name']}」還沒有寫任何步驟。到 Notion 補上，"
+            "或用「流程 名稱」加換行重新輸入一次。"
+        )
+    body = "\n".join(f"{index}. {line}" for index, line in enumerate(steps, 1))
+    return AgentResult(text=f"{sop['name']}\n{body}")
 
 
 def _looks_like_expense(text: str) -> bool:
@@ -372,6 +515,11 @@ def _match_create_event(text: str) -> AgentResult | None:
 
 # 順序有意義：越明確的規則越前面，最寬鬆的新增行程放最後
 _RULES = (
+    # 待辦要排在記帳前面。「待辦 咖啡豆 300」如果先給記帳規則看，
+    # 會變成一筆 300 元的餐飲支出。
+    _match_todo_add,
+    _match_todo_query,
+    _match_sop_add,
     # 指定分類的要排在關鍵字猜測前面，否則「餐飲 午餐 120」的項目
     # 會變成「餐飲 午餐」
     _match_expense_with_category,
@@ -380,6 +528,8 @@ _RULES = (
     _match_expense_query,
     _match_free_slots,
     _match_calendar,
+    # 查流程排在查行程後面：「明天怎麼安排」該回行程，不是去找流程
+    _match_sop_query,
     _match_create_event,
 )
 

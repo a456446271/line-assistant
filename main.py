@@ -9,9 +9,12 @@ from __future__ import annotations
 import hmac
 import json
 import logging
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
+from functools import lru_cache
+from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Body, FastAPI, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse
 
 import agent
 import calendar_api
@@ -20,6 +23,8 @@ import expense_api
 import line_api
 import pending
 import rules
+import sop_api
+import todo_api
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("line-assistant")
@@ -36,7 +41,10 @@ _NO_RULE_REPLY = (
     "・查行程：今天有什麼安排\n"
     "・加行程：明天下午三點開會\n"
     "・查空檔：明天下午有空嗎\n"
-    "・查消費：這個月花多少"
+    "・查消費：這個月花多少\n"
+    "・加待辦：待辦 買牛奶\n"
+    "・看待辦：待辦\n"
+    "・查流程：收班流程"
 )
 
 
@@ -50,7 +58,95 @@ def healthz() -> dict:
         "llm": config.LLM_ENABLED,  # False = 純規則模式，不花 API 錢
         "allowed_users": len(config.ALLOWED_USER_IDS),
         "model": config.CLAUDE_MODEL if config.LLM_ENABLED else None,
+        "todo": todo_api.enabled(),
+        "sop": sop_api.enabled(),
+        "liff": config.LIFF_ENABLED,
     }
+
+
+# --- LIFF：在 LINE 裡開的待辦網頁 ---
+
+
+@lru_cache(maxsize=1)
+def _liff_page() -> str:
+    html = (Path(__file__).parent / "liff.html").read_text(encoding="utf-8")
+    return html.replace("__LIFF_ID__", config.LIFF_ID)
+
+
+@app.get("/liff", response_class=HTMLResponse)
+def liff_page() -> str:
+    if not config.LIFF_ENABLED:
+        raise HTTPException(status_code=404, detail="LIFF 沒有啟用")
+    return _liff_page()
+
+
+def _liff_user(id_token: str) -> str:
+    """驗證 LIFF 傳來的身分。這是這幾個 API 唯一的門，驗不過就擋掉。
+
+    webhook 靠 channel secret 的簽章擋住外人，但 /api 是瀏覽器直接打的，
+    只能靠 ID token。沒驗證的話待辦清單等於公開在網路上。
+    """
+    if not config.LIFF_ENABLED:
+        raise HTTPException(status_code=404, detail="LIFF 沒有啟用")
+    user_id = line_api.verify_id_token(id_token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="身分驗證失敗")
+    if config.ALLOWED_USER_IDS and user_id not in config.ALLOWED_USER_IDS:
+        logger.warning("LIFF 拒絕未授權的 user_id=%s", user_id)
+        raise HTTPException(status_code=403, detail="沒有權限")
+    return user_id
+
+
+def _todo_json() -> list[dict]:
+    """回傳目前的未完成清單。每個寫入 API 都回這個，前端就不必自己維護狀態。"""
+    return [
+        {
+            "page_id": row["page_id"],
+            "title": row["title"],
+            "due": row["due"].isoformat() if row["due"] else None,
+            "category": row["category"],
+        }
+        for row in todo_api.open_todos()
+    ]
+
+
+@app.get("/api/todos")
+def api_list_todos(x_line_id_token: str = Header("")) -> list[dict]:
+    _liff_user(x_line_id_token)
+    return _todo_json()
+
+
+@app.post("/api/todos")
+def api_add_todo(
+    payload: dict = Body(...),
+    x_line_id_token: str = Header(""),
+) -> list[dict]:
+    _liff_user(x_line_id_token)
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="沒有內容")
+
+    due = payload.get("due")
+    todo_api.add_todo(
+        title,
+        date.fromisoformat(due) if due else None,
+        str(payload.get("category") or ""),
+    )
+    return _todo_json()
+
+
+@app.post("/api/todos/{page_id}/done")
+def api_complete_todo(page_id: str, x_line_id_token: str = Header("")) -> list[dict]:
+    _liff_user(x_line_id_token)
+    todo_api.complete_todo(page_id)
+    return _todo_json()
+
+
+@app.delete("/api/todos/{page_id}")
+def api_delete_todo(page_id: str, x_line_id_token: str = Header("")) -> list[dict]:
+    _liff_user(x_line_id_token)
+    todo_api.delete_todo(page_id)
+    return _todo_json()
 
 
 # --- Webhook ---
@@ -84,6 +180,11 @@ async def webhook(request: Request, background: BackgroundTasks) -> dict:
     return {"ok": True}
 
 
+def _todo_card(rows: list[dict]) -> dict:
+    today = datetime.now(config.TZ).date()
+    return line_api.todo_list_card(rows, today, len(rows), config.LIFF_URL)
+
+
 def _describe(start_iso: str, end_iso: str) -> str:
     start = calendar_api.parse_dt(start_iso)
     end = calendar_api.parse_dt(end_iso)
@@ -111,6 +212,11 @@ def _handle_text(user_id: str, reply_token: str, user_text: str) -> None:
     if result.created_expense:
         # 記帳的回覆本身就帶撤銷按鈕，不用再多送一則純文字。
         messages = [line_api.expense_card(result.text, result.created_expense["page_id"])]
+    elif result.todo_list:
+        # 用卡片而不是純文字，這樣每一列都能直接按完成或刪除，不用再打字回覆。
+        messages = [_todo_card(result.todo_list)]
+        if result.text:
+            messages.insert(0, line_api.text(result.text))
     elif result.pending_event:
         event = result.pending_event
         pending_id = pending.put(event)
@@ -137,6 +243,7 @@ def _handle_postback(user_id: str, reply_token: str, data: str) -> None:
     params = line_api.parse_postback(data)
     action = params.get("action", "")
 
+    messages: list[dict] = []
     try:
         if action == "confirm_event":
             event = pending.take(params.get("pid", ""))
@@ -160,15 +267,29 @@ def _handle_postback(user_id: str, reply_token: str, data: str) -> None:
             expense_api.archive_expense(params.get("page_id", ""))
             message = "已撤銷這筆記帳。"
 
+        elif action in ("done_todo", "delete_todo"):
+            page_id = params.get("page_id", "")
+            if action == "done_todo":
+                message = f"已完成：{todo_api.complete_todo(page_id)}"
+            else:
+                message = f"已刪除：{todo_api.delete_todo(page_id)}"
+            # 順便把更新後的清單再送一次，這樣要連續處理好幾筆時不用重打「待辦」
+            rows = todo_api.open_todos()
+            if rows:
+                messages = [_todo_card(rows)]
+            else:
+                message += "\n待辦都清完了。"
+
         else:
             message = "不認得這個動作。"
 
     except Exception:
         logger.exception("postback 處理失敗 action=%s", action)
         message = _ERROR_REPLY
+        messages = []
 
     try:
-        line_api.reply(reply_token, [line_api.text(message)])
+        line_api.reply(reply_token, [line_api.text(message), *messages])
     except Exception:
         logger.exception("回覆失敗")
 
@@ -182,24 +303,45 @@ def _push_all(messages: list[dict]) -> int:
     return len(config.ALLOWED_USER_IDS)
 
 
+def _todo_digest(today) -> str:
+    """今天（含逾期）該處理的待辦。沒有就回空字串。
+
+    待辦本來要自己想到才會去問，放進早報才真的會被看到。
+    只列到期的，沒期限的不推——那些推了只會變成每天都在的雜訊。
+    """
+    if not todo_api.enabled():
+        return ""
+    try:
+        rows = todo_api.due_by(today)
+    except Exception:
+        logger.exception("早報取待辦失敗")
+        return ""
+    return "\n".join(
+        f"・{row['title']}" + (f"（逾期 {(today - row['due']).days} 天）" if row["due"] < today else "")
+        for row in rows
+    )
+
+
 def _job_daily() -> dict:
     today = datetime.now(config.TZ).date()
     start = datetime.combine(today, time.min, config.TZ)
     events = calendar_api.list_events(start, start + timedelta(days=1))
+    listing = "\n".join(f"・{agent.fmt_event(event)}" for event in events)
+    todos = _todo_digest(today)
 
-    if not events:
-        body = "今天沒有安排的行程。"
-    else:
-        listing = "\n".join(f"・{agent.fmt_event(event)}" for event in events)
-        # 沒啟用 Claude 就直接排版，早報本來也不一定要 AI 潤稿
-        body = (
-            agent.summarize(
-                "這是使用者今天的行程，請寫一段簡短的早安摘要（三到五行，口語一點，"
-                f"點出時間壓力或空檔）：\n{listing}"
-            )
-            if config.LLM_ENABLED
-            else f"今天有 {len(events)} 個行程：\n{listing}"
+    if config.LLM_ENABLED:
+        body = agent.summarize(
+            "這是使用者今天的行程與待辦，請寫一段簡短的早安摘要（三到五行，口語一點，"
+            "點出時間壓力或空檔，逾期的待辦要特別提）：\n"
+            f"行程：\n{listing or '（沒有行程）'}\n"
+            f"今天到期的待辦：\n{todos or '（沒有）'}"
         )
+    else:
+        # 沒啟用 Claude 就直接排版，早報本來也不一定要 AI 潤稿
+        parts = [f"今天有 {len(events)} 個行程：\n{listing}" if events else "今天沒有安排的行程。"]
+        if todos:
+            parts.append(f"該處理的待辦：\n{todos}")
+        body = "\n\n".join(parts)
 
     return {"job": "daily", "pushed_to": _push_all([line_api.text(f"早安！\n\n{body}")])}
 

@@ -16,6 +16,8 @@ from anthropic import beta_tool
 import calendar_api
 import config
 import expense_api
+import sop_api
+import todo_api
 
 _WEEKDAYS = "一二三四五六日"
 
@@ -26,6 +28,7 @@ class TurnContext:
 
     pending_event: dict | None = None
     created_expense: dict | None = None
+    todo_list: list[dict] | None = None
 
 
 _ctx: ContextVar[TurnContext] = ContextVar("turn_context")
@@ -36,6 +39,8 @@ class AgentResult:
     text: str
     pending_event: dict | None = None
     created_expense: dict | None = None
+    # 有值時（可能是空 list）呼叫端要改用待辦清單卡片回覆，讓每列都能直接勾完成
+    todo_list: list[dict] | None = None
 
 
 def _now() -> datetime:
@@ -146,6 +151,40 @@ def get_budget_status(month: str = "") -> str:
     return f"{start:%Y年%m月} 預算狀況：\n" + "\n".join(lines)
 
 
+@beta_tool
+def list_todos() -> str:
+    """列出所有還沒完成的待辦事項。使用者問「有什麼事要做」「待辦」時用這個。"""
+    rows = todo_api.open_todos()
+    _ctx.get().todo_list = rows
+    if not rows:
+        return "目前沒有未完成的待辦。"
+    return (
+        "已經把清單做成可勾選的卡片給使用者了。"
+        "請只用一句話總結（例如有幾筆、哪幾筆逾期），不要逐條複述。\n"
+        + "\n".join(
+            f"{row['title']}（{row['due'] or '沒有期限'}）" for row in rows
+        )
+    )
+
+
+@beta_tool
+def get_sop(name: str) -> str:
+    """查一份流程／SOP 的步驟，例如「收班流程」「印保證卡流程」。
+
+    Args:
+        name: 流程名稱或關鍵字
+    """
+    sop = sop_api.find(name)
+    if sop is None:
+        names = "、".join(item["name"] for item in sop_api.list_sops())
+        return f"找不到這份流程。目前有的流程：{names or '（一份都沒有）'}"
+    lines = sop_api.steps(sop["page_id"])
+    if not lines:
+        return f"「{sop['name']}」這份流程還沒有寫任何步驟。"
+    body = "\n".join(f"{index}. {line}" for index, line in enumerate(lines, 1))
+    return f"{sop['name']}\n{body}\n\n請原樣呈現這些步驟，不要改寫或補充。"
+
+
 # --- 工具（寫入） ---
 
 
@@ -198,6 +237,37 @@ def add_expense(amount: float, item: str, category: str, spent_on: str = "") -> 
     )
 
 
+@beta_tool
+def add_todo(title: str, due: str = "", category: str = "") -> str:
+    """新增一筆待辦事項。沒有明確時間點、只是「要記得做」的事情用這個，
+    有明確時間的行程要用 propose_create_event。
+
+    Args:
+        title: 待辦內容
+        due: 期限，YYYY-MM-DD，沒講期限就留空
+        category: 分類，只能是 工作／家裡／購物／其他，判斷不出來就留空
+    """
+    result = todo_api.add_todo(
+        title, date.fromisoformat(due) if due else None, category
+    )
+    return f"已加入待辦：{result['title']}。請只用一句話確認。"
+
+
+@beta_tool
+def add_sop(name: str, steps: str) -> str:
+    """新增一份流程／SOP。
+
+    Args:
+        name: 流程名稱，例如「收班流程」
+        steps: 步驟，一行一步，用換行分隔
+    """
+    lines = [line for line in steps.splitlines() if line.strip()]
+    if not lines:
+        return "沒有任何步驟，沒有建立。請問使用者流程的內容。"
+    result = sop_api.add_sop(name, lines)
+    return f"已建立流程「{result['name']}」，共 {result['count']} 步。請只用一句話確認。"
+
+
 TOOLS = [
     list_events,
     find_free_slots,
@@ -206,6 +276,13 @@ TOOLS = [
     propose_create_event,
     add_expense,
 ]
+
+# 待辦與流程是選填功能，沒設資料庫就不要給模型這些工具，
+# 否則它會呼叫一個必定失敗的東西。
+if todo_api.enabled():
+    TOOLS += [list_todos, add_todo]
+if sop_api.enabled():
+    TOOLS += [get_sop, add_sop]
 
 
 def _date_reference() -> str:
@@ -220,6 +297,22 @@ def _date_reference() -> str:
         label = {0: "（今天）", 1: "（明天）", 2: "（後天）"}.get(offset, "")
         lines.append(f"{day.isoformat()} 星期{_WEEKDAYS[day.weekday()]}{label}")
     return "\n".join(lines)
+
+
+def _extra_rules() -> str:
+    """待辦與流程沒開啟時，這些規則講了也沒用，只會佔 token。"""
+    rules = []
+    if todo_api.enabled():
+        rules.append(
+            "- 有明確時間點的事（三點開會）走 propose_create_event；"
+            "只是「要記得做」而沒有時間的（買牛奶、繳費）走 add_todo。分不出來時問一句。"
+        )
+    if sop_api.enabled():
+        rules.append(
+            "- 問「某某流程」「怎麼做某事」時呼叫 get_sop，並原樣列出步驟，不要自己改寫或補充。"
+            "找不到就照實說找不到，絕對不要憑常識編一套流程出來。"
+        )
+    return ("\n" + "\n".join(rules)) if rules else ""
 
 
 def _system_prompt() -> str:
@@ -244,7 +337,7 @@ def _system_prompt() -> str:
 - 講到「今天」「明天」「下週二」時，對照上面的日期表換算成實際日期再呼叫工具。
 - 沒講結束時間的行程一律抓一小時。
 - 查完資料後直接講結論，不要複述你呼叫了哪些工具。
-- 資料裡沒有的事就說沒有，不要編。"""
+- 資料裡沒有的事就說沒有，不要編。{_extra_rules()}"""
 
 
 def run(user_text: str) -> AgentResult:
@@ -283,6 +376,7 @@ def run(user_text: str) -> AgentResult:
         text=text or "（沒有內容）",
         pending_event=context.pending_event,
         created_expense=context.created_expense,
+        todo_list=context.todo_list,
     )
 
 

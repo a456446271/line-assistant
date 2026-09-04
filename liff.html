@@ -1,0 +1,216 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>待辦</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 0 0 24px;
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Noto Sans TC", sans-serif;
+    background: #f5f5f7; color: #1c1c1e;
+  }
+  header {
+    position: sticky; top: 0; z-index: 2;
+    background: #fff; border-bottom: 1px solid #e5e5ea;
+    padding: 12px 16px calc(12px + env(safe-area-inset-top)) 16px;
+    padding-top: calc(12px + env(safe-area-inset-top));
+  }
+  h1 { margin: 0 0 10px; font-size: 17px; }
+  h1 span { color: #8e8e93; font-weight: 400; font-size: 14px; }
+
+  .add { display: flex; gap: 8px; }
+  .add input[type=text] {
+    flex: 1; min-width: 0; padding: 10px 12px; font-size: 16px;
+    border: 1px solid #d1d1d6; border-radius: 10px; background: #fff;
+  }
+  .add button {
+    padding: 10px 16px; font-size: 15px; font-weight: 600;
+    border: 0; border-radius: 10px; background: #06c755; color: #fff;
+  }
+  .add button:disabled { background: #c7c7cc; }
+
+  .opts { display: flex; gap: 8px; margin-top: 8px; }
+  .opts input, .opts select {
+    flex: 1; min-width: 0; padding: 8px 10px; font-size: 14px;
+    border: 1px solid #d1d1d6; border-radius: 8px; background: #fff; color: #1c1c1e;
+  }
+
+  ul { list-style: none; margin: 12px 0 0; padding: 0 12px; }
+  li {
+    display: flex; align-items: flex-start; gap: 12px;
+    background: #fff; border-radius: 12px; padding: 14px;
+    margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,.06);
+  }
+  li.busy { opacity: .45; }
+  .box {
+    flex: 0 0 22px; height: 22px; margin-top: 1px;
+    border: 2px solid #c7c7cc; border-radius: 6px; background: #fff;
+  }
+  .body { flex: 1; min-width: 0; }
+  .title { word-break: break-word; }
+  .meta { margin-top: 3px; font-size: 12px; color: #8e8e93; }
+  .meta .over { color: #d64545; font-weight: 600; }
+  .meta .today { color: #d67b20; font-weight: 600; }
+  .del {
+    flex: 0 0 auto; border: 0; background: none; color: #c7c7cc;
+    font-size: 20px; line-height: 1; padding: 2px 4px;
+  }
+  .note { padding: 40px 24px; text-align: center; color: #8e8e93; }
+  .note b { display: block; color: #1c1c1e; margin-bottom: 6px; font-size: 16px; }
+</style>
+
+<header>
+  <h1>待辦 <span id="count"></span></h1>
+  <div class="add">
+    <input type="text" id="title" placeholder="要做什麼？" enterkeyhint="done" autocomplete="off">
+    <button id="save" disabled>新增</button>
+  </div>
+  <div class="opts">
+    <input type="date" id="due" aria-label="期限">
+    <select id="category" aria-label="分類">
+      <option value="">未分類</option>
+      <option>工作</option><option>家裡</option><option>購物</option><option>其他</option>
+    </select>
+  </div>
+</header>
+
+<ul id="list"></ul>
+<div class="note" id="note"><b>載入中…</b></div>
+
+<script>
+const LIFF_ID = "__LIFF_ID__";
+const $ = (id) => document.getElementById(id);
+let token = "";
+
+function say(title, detail) {
+  $("note").innerHTML = "<b></b><span></span>";
+  $("note").firstChild.textContent = title;
+  $("note").lastChild.textContent = detail || "";
+  $("note").style.display = "";
+}
+
+async function api(path, options = {}) {
+  const response = await fetch("/api" + path, {
+    ...options,
+    headers: { "Content-Type": "application/json", "X-Line-Id-Token": token },
+  });
+  if (!response.ok) throw new Error(await response.text());
+  return response.status === 204 ? null : response.json();
+}
+
+// 期限的說法：逾期跟今天要一眼看得出來，其他日子講日期就好
+function dueLabel(due) {
+  if (!due) return "";
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const when = new Date(due + "T00:00:00");
+  const days = Math.round((when - today) / 86400000);
+  const shown = (when.getMonth() + 1) + "/" + when.getDate();
+  if (days < 0) return '<span class="over">逾期 ' + -days + " 天 · " + shown + "</span>";
+  if (days === 0) return '<span class="today">今天</span>';
+  if (days === 1) return "明天";
+  return shown;
+}
+
+function render(rows) {
+  $("count").textContent = rows.length ? rows.length + " 筆" : "";
+  $("list").innerHTML = "";
+  if (!rows.length) {
+    say("清單是空的", "上面打一句話就能新增。");
+    return;
+  }
+  $("note").style.display = "none";
+
+  for (const row of rows) {
+    const item = document.createElement("li");
+
+    const box = document.createElement("div");
+    box.className = "box";
+    box.onclick = () => act(item, "/todos/" + row.page_id + "/done", "POST");
+
+    const body = document.createElement("div");
+    body.className = "body";
+    const title = document.createElement("div");
+    title.className = "title";
+    title.textContent = row.title;
+    body.appendChild(title);
+
+    const bits = [dueLabel(row.due), row.category].filter(Boolean);
+    if (bits.length) {
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.innerHTML = bits.join(" · ");
+      body.appendChild(meta);
+    }
+
+    const del = document.createElement("button");
+    del.className = "del";
+    del.textContent = "✕";
+    del.onclick = () => {
+      if (confirm("刪除「" + row.title + "」？")) {
+        act(item, "/todos/" + row.page_id, "DELETE");
+      }
+    };
+
+    item.append(box, body, del);
+    $("list").appendChild(item);
+  }
+}
+
+// 先把那一列變淡再送出，慢的時候才知道按有反應
+async function act(item, path, method) {
+  if (item.classList.contains("busy")) return;
+  item.classList.add("busy");
+  try {
+    render(await api(path, { method }));
+  } catch (error) {
+    item.classList.remove("busy");
+    alert("操作失敗：" + error.message);
+  }
+}
+
+async function add() {
+  const title = $("title").value.trim();
+  if (!title) return;
+  $("save").disabled = true;
+  try {
+    const rows = await api("/todos", {
+      method: "POST",
+      body: JSON.stringify({
+        title,
+        due: $("due").value || null,
+        category: $("category").value || null,
+      }),
+    });
+    $("title").value = "";
+    $("due").value = "";
+    render(rows);
+  } catch (error) {
+    alert("新增失敗：" + error.message);
+  }
+  $("save").disabled = !$("title").value.trim();
+}
+
+$("title").addEventListener("input", () => {
+  $("save").disabled = !$("title").value.trim();
+});
+$("title").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); add(); }
+});
+$("save").onclick = add;
+
+(async () => {
+  try {
+    await liff.init({ liffId: LIFF_ID });
+    if (!liff.isLoggedIn()) return liff.login();
+    token = liff.getIDToken();
+    if (!token) {
+      return say("拿不到登入資訊", "到 LINE Developers 的 LIFF 設定把 openid 權限打開。");
+    }
+    render(await api("/todos"));
+  } catch (error) {
+    say("載入失敗", String(error.message || error));
+  }
+})();
+</script>

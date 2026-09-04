@@ -2,3 +2,6 @@
 .venv/
 __pycache__/
 *.pyc
+
+# setup_richmenu.py --preview 產生的，可重新產生
+richmenu.png

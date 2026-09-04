@@ -174,3 +174,135 @@ def expense_card(summary: str, page_id: str) -> dict:
             },
         },
     }
+
+
+def _icon_button(label: str, data: str, color: str) -> dict:
+    """清單列右邊的小按鈕。用符號而不是文字，兩顆才排得下一列。"""
+    return {
+        "type": "text",
+        "text": label,
+        "size": "lg",
+        "flex": 0,
+        "align": "center",
+        "gravity": "center",
+        "color": color,
+        "margin": "md",
+        "action": {"type": "postback", "data": data},
+    }
+
+
+def _todo_line(row: dict, today) -> dict:
+    """待辦清單的一列：左邊事項，右邊完成與刪除。"""
+    due = row["due"]
+    if due is None:
+        mark, color = "", "#333333"
+    elif due < today:
+        mark, color = f"（逾期 {(today - due).days} 天）", "#D64545"
+    elif due == today:
+        mark, color = "（今天）", "#D67B20"
+    else:
+        mark, color = f"（{due.month}/{due.day}）", "#333333"
+
+    return {
+        "type": "box",
+        "layout": "horizontal",
+        "alignItems": "center",
+        "contents": [
+            {
+                "type": "text",
+                "text": f"{row['title']}{mark}",
+                "size": "sm",
+                "wrap": True,
+                "flex": 1,
+                "color": color,
+            },
+            _icon_button("✓", f"action=done_todo&page_id={row['page_id']}", "#2E7D32"),
+            _icon_button("✕", f"action=delete_todo&page_id={row['page_id']}", "#BBBBBB"),
+        ],
+    }
+
+
+def todo_list_card(rows: list[dict], today, total: int, liff_url: str = "") -> dict:
+    """待辦清單卡片。每列都能直接按，不用再回一句話。
+
+    LINE 的 Flex 泡泡塞太多列會被截斷，所以最多顯示 10 筆，其餘只報數量，
+    要看全部就按底下開網頁。
+    """
+    shown = rows[:10]
+    contents: list[dict] = [
+        {
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                {"type": "text", "text": f"待辦（{total} 筆）", "weight": "bold", "size": "md", "flex": 1},
+                {"type": "text", "text": "✓ 完成　✕ 刪除", "size": "xxs", "color": "#999999",
+                 "align": "end", "gravity": "center", "flex": 0},
+            ],
+        },
+        {"type": "separator", "margin": "md"},
+    ]
+    for index, row in enumerate(shown):
+        line = _todo_line(row, today)
+        if index:
+            line["margin"] = "sm"
+        contents.append(line)
+
+    if total > len(shown):
+        contents.append(
+            {
+                "type": "text",
+                "text": f"⋯ 還有 {total - len(shown)} 筆",
+                "size": "xs",
+                "color": "#999999",
+                "margin": "md",
+            }
+        )
+
+    bubble: dict = {
+        "type": "bubble",
+        "body": {"type": "box", "layout": "vertical", "spacing": "none", "contents": contents},
+    }
+    if liff_url:
+        bubble["footer"] = {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "style": "link",
+                    "height": "sm",
+                    "action": {"type": "uri", "label": "開啟完整清單", "uri": liff_url},
+                }
+            ],
+        }
+
+    return {
+        "type": "flex",
+        "altText": f"待辦（{total} 筆）",
+        "contents": bubble,
+    }
+
+
+# --- LIFF 身分驗證 ---
+
+
+def verify_id_token(id_token: str) -> str:
+    """驗證 LIFF 傳來的 ID token，回傳 LINE user id。驗不過回空字串。
+
+    刻意送去 LINE 的 verify 端點而不是自己解 JWT：簽章、有效期與 audience
+    都由 LINE 檢查，這裡不必自己實作也就不會實作錯。
+    audience 一定要帶，否則別的 channel 發的 token 也會通過。
+    """
+    if not id_token or not config.LINE_CHANNEL_ID:
+        return ""
+    try:
+        response = httpx.post(
+            "https://api.line.me/oauth2/v2.1/verify",
+            data={"id_token": id_token, "client_id": config.LINE_CHANNEL_ID},
+            timeout=10,
+        )
+    except httpx.HTTPError:
+        return ""
+    if response.status_code != 200:
+        return ""
+    return response.json().get("sub", "")

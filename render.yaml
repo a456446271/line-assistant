@@ -25,6 +25,16 @@ services:
         sync: false
       - key: NOTION_EXPENSE_DB_ID
         sync: false
+      # 選填。留空就是關閉待辦／流程功能。
+      - key: NOTION_TODO_DB_ID
+        sync: false
+      - key: NOTION_SOP_DB_ID
+        sync: false
+      # 選填。兩個都設了才會啟用 LIFF 待辦網頁。
+      - key: LIFF_ID
+        sync: false
+      - key: LINE_CHANNEL_ID
+        sync: false
       - key: CRON_SECRET
         sync: false
       # 選填。留空即純規則模式，完全不呼叫 Claude API。

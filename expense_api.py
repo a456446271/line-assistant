@@ -1,18 +1,14 @@
 """Notion 記帳資料庫的讀寫。
 
-直接打 REST 而不是用 notion-client，是為了能自己釘住 Notion-Version：
-較新的 API 版本把 database_id 換成 data_source_id，釘住版本可以避開那次改版。
+底層的 HTTP 與版本釘選在 notion.py，這裡只管記帳這張表的欄位與查詢。
 """
 
 from __future__ import annotations
 
 from datetime import date
 
-import httpx
-
 import config
-
-_API = "https://api.notion.com/v1"
+import notion
 
 # Notion 資料庫的欄位名稱。改欄位名稱時只要動這裡。
 PROP_ITEM = "項目"
@@ -20,20 +16,6 @@ PROP_AMOUNT = "金額"
 PROP_CATEGORY = "分類"
 PROP_DATE = "日期"
 PROP_SOURCE = "來源"
-
-
-def _headers() -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {config.NOTION_TOKEN}",
-        "Notion-Version": config.NOTION_VERSION,
-        "Content-Type": "application/json",
-    }
-
-
-def _post(path: str, payload: dict) -> dict:
-    response = httpx.post(f"{_API}{path}", headers=_headers(), json=payload, timeout=20)
-    response.raise_for_status()
-    return response.json()
 
 
 def add_expense(amount: float, category: str, item: str, spent_on: str) -> dict:
@@ -51,7 +33,7 @@ def add_expense(amount: float, category: str, item: str, spent_on: str) -> dict:
             PROP_SOURCE: {"select": {"name": "LINE"}},
         },
     }
-    created = _post("/pages", payload)
+    created = notion.post("/pages", payload)
     return {
         "page_id": created["id"],
         "item": item,
@@ -63,23 +45,16 @@ def add_expense(amount: float, category: str, item: str, spent_on: str) -> dict:
 
 def archive_expense(page_id: str) -> None:
     """把某筆消費封存（撤銷）。"""
-    response = httpx.patch(
-        f"{_API}/pages/{page_id}",
-        headers=_headers(),
-        json={"archived": True},
-        timeout=20,
-    )
-    response.raise_for_status()
+    notion.patch(f"/pages/{page_id}", {"archived": True})
 
 
 def _row(page: dict) -> dict:
     props = page["properties"]
-    title = props[PROP_ITEM]["title"]
     category = props[PROP_CATEGORY].get("select")
     spent_on = props[PROP_DATE].get("date")
     return {
         "page_id": page["id"],
-        "item": title[0]["plain_text"] if title else "(無標題)",
+        "item": notion.plain(props[PROP_ITEM]["title"]) or "(無標題)",
         "amount": props[PROP_AMOUNT].get("number") or 0,
         "category": category["name"] if category else "其他",
         "date": spent_on["start"] if spent_on else "",
@@ -99,25 +74,14 @@ def query_expenses(
     if category:
         conditions.append({"property": PROP_CATEGORY, "select": {"equals": category}})
 
-    rows: list[dict] = []
-    cursor: str | None = None
-    while True:
-        payload: dict = {
+    pages = notion.query_all(
+        config.NOTION_EXPENSE_DB_ID,
+        {
             "filter": {"and": conditions},
             "sorts": [{"property": PROP_DATE, "direction": "ascending"}],
-            "page_size": 100,
-        }
-        if cursor:
-            payload["start_cursor"] = cursor
-
-        data = _post(f"/databases/{config.NOTION_EXPENSE_DB_ID}/query", payload)
-        rows.extend(_row(page) for page in data["results"])
-
-        if not data.get("has_more"):
-            break
-        cursor = data["next_cursor"]
-
-    return rows
+        },
+    )
+    return [_row(page) for page in pages]
 
 
 def totals_by_category(rows: list[dict]) -> dict[str, float]:
