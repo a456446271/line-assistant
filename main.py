@@ -265,6 +265,31 @@ def api_list_expenses(month: str = "", x_line_id_token: str = Header("")) -> dic
     return _expenses_json(month)
 
 
+@app.get("/api/expenses/frequent")
+def api_frequent_items(x_line_id_token: str = Header("")) -> list[dict]:
+    """快捷按鈕。看過去半年，太久以前的習慣已經不代表現在了。"""
+    _liff_user(x_line_id_token)
+    today = datetime.now(config.TZ).date()
+    rows = expense_api.query_expenses(today - timedelta(days=183), today)
+    return expense_api.frequent_items(rows)
+
+
+@app.get("/api/expenses/search")
+def api_search_expenses(
+    q: str = "", months: int = 12, x_line_id_token: str = Header("")
+) -> dict:
+    _liff_user(x_line_id_token)
+    today = datetime.now(config.TZ).date()
+    rows = expense_api.search_expenses(
+        q, today - timedelta(days=31 * max(1, min(months, 36))), today
+    )
+    return {
+        "total": sum(row["amount"] for row in rows),
+        "count": len(rows),
+        "rows": list(reversed(rows)),
+    }
+
+
 @app.post("/api/expenses")
 def api_add_expense(payload: dict = Body(...), x_line_id_token: str = Header("")) -> dict:
     _liff_user(x_line_id_token)

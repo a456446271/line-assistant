@@ -84,6 +84,83 @@ def query_expenses(
     return [_row(page) for page in pages]
 
 
+# 還沒有足夠歷史時的起手快捷。等真實紀錄累積起來就會被擠掉，
+# 所以這裡不必想得太全，能讓第一天就有東西可按就好。
+_STARTER = (
+    ("午餐", "餐飲", 120),
+    ("晚餐", "餐飲", 150),
+    ("飲料", "餐飲", 60),
+    ("超商", "餐飲", 100),
+    ("加油", "交通", 500),
+    ("停車", "交通", 50),
+    ("捷運", "交通", 30),
+    ("日用品", "購物", 200),
+)
+
+# 記過幾次才算「常用」。設 1 的話買一次沙發、買一款遊戲就會變成快捷按鈕，
+# 但那些東西這輩子不會再按第二次。
+_MIN_TIMES = 2
+
+
+def frequent_items(rows: list[dict], limit: int = 8) -> list[dict]:
+    """最常記的項目，附上最近一次的金額，給快捷按鈕用。
+
+    金額取「最近一次」而不是平均：午餐從 100 漲到 140 之後，
+    平均會給出一個你從來沒付過的數字。
+    """
+    seen: dict[str, dict] = {}
+    for row in rows:  # rows 依日期由舊到新，後面的會蓋掉前面的金額
+        item = row["item"].strip()
+        if not item:
+            continue
+        entry = seen.setdefault(item, {"item": item, "count": 0})
+        entry["count"] += 1
+        entry["category"] = row["category"]
+        entry["amount"] = row["amount"]
+
+    picked = sorted(
+        (entry for entry in seen.values() if entry["count"] >= _MIN_TIMES),
+        key=lambda entry: -entry["count"],
+    )[:limit]
+
+    # 比對的是「已經挑進來的」而不是「歷史出現過的」：只記過一次的午餐
+    # 兩邊都不算數，會整個消失，但那正是最該有快捷的東西。
+    # 歷史上有記過的話金額沿用你自己付過的，不要用我猜的預設值。
+    chosen = {entry["item"] for entry in picked}
+    for item, category, amount in _STARTER:
+        if len(picked) >= limit:
+            break
+        if item in chosen or category not in config.CATEGORIES:
+            continue
+        past = seen.get(item)
+        picked.append(
+            {
+                "item": item,
+                "category": past["category"] if past else category,
+                "amount": past["amount"] if past else amount,
+                "count": past["count"] if past else 0,
+            }
+        )
+
+    return picked
+
+
+def search_expenses(keyword: str, start_date: date, end_date: date) -> list[dict]:
+    """在區間內用項目名稱搜尋。
+
+    Notion 的 title contains 篩選是區分不了大小寫的，而且中英混雜的項目名
+    （foodpanda、7-11）常常記得跟當初不完全一樣，所以改成全抓回來自己比對。
+    個人記帳一年也才幾百筆，這個量級不值得為了省流量犧牲搜得到的機率。
+    """
+    needle = keyword.strip().lower()
+    if not needle:
+        return []
+    return [
+        row for row in query_expenses(start_date, end_date)
+        if needle in row["item"].lower() or needle == row["category"]
+    ]
+
+
 def totals_by_category(rows: list[dict]) -> dict[str, float]:
     totals: dict[str, float] = {}
     for row in rows:

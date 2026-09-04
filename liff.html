@@ -10,6 +10,9 @@
     --green: #06c755; --red: #d64545; --amber: #d67b20;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  /* 元素自己設了 display 的話會蓋掉 hidden 屬性（.chips 的 flex 就是），
+     所以這裡強制一次，之後用 el.hidden 才會真的有效 */
+  [hidden] { display: none !important; }
   body {
     margin: 0; padding: 0 0 40px;
     font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Noto Sans TC", sans-serif;
@@ -112,6 +115,16 @@
     border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--dim);
   }
   .chips button[aria-pressed=true] { background: var(--ink); border-color: var(--ink); color: #fff; }
+  /* 記帳快捷跟過濾膠囊長得不一樣：它是按了會做事，不是切換狀態 */
+  #chips-expense button { border-style: dashed; }
+  #chips-expense span { color: #c7c7cc; margin-left: 5px; }
+
+  .search {
+    width: 100%; padding: 9px 12px; font-size: 16px; margin-bottom: 10px;
+    border: 1px solid var(--line); border-radius: 10px; background: #fff;
+  }
+  .found { font-size: 13px; color: var(--dim); padding: 2px 2px 8px; }
+  .found b { color: var(--ink); }
 
   .note { padding: 34px 24px; text-align: center; color: var(--dim); }
   .note b { display: block; color: var(--ink); margin-bottom: 6px; font-size: 16px; }
@@ -139,6 +152,7 @@
     <button type="button" data-done="0" aria-pressed="true">未完成</button>
     <button type="button" data-done="1" aria-pressed="false">已完成</button>
   </div>
+  <input class="search" id="search-todo" type="search" placeholder="搜尋待辦" autocomplete="off">
   <ul id="list-todo"></ul>
   <div class="note" id="note-todo"><b>載入中…</b></div>
 </section>
@@ -183,12 +197,16 @@
 
 <section class="pane" id="pane-expense" hidden>
   <div class="card" id="expense-summary"></div>
+  <div class="chips" id="chips-expense"></div>
   <form id="form-expense" class="card">
     <input class="half" id="expense-item" type="text" placeholder="項目" autocomplete="off">
     <input class="half" id="expense-amount" type="number" inputmode="numeric" placeholder="金額">
     <select class="wide" id="expense-cat" aria-label="分類"></select>
     <button type="submit" disabled>記一筆</button>
   </form>
+  <input class="search" id="search-expense" type="search"
+         placeholder="搜尋過去一年的消費（按 Enter）" autocomplete="off" enterkeyhint="search">
+  <div id="result-expense"></div>
   <ul id="list-expense"></ul>
   <div class="note" id="note-expense"><b>載入中…</b></div>
 </section>
@@ -206,6 +224,7 @@
     </form>
   </details>
   <div class="chips" id="chips-sop" hidden></div>
+  <input class="search" id="search-sop" type="search" placeholder="搜尋流程（名稱或別名）" autocomplete="off">
   <div id="list-sop"></div>
   <div class="note" id="note-sop"><b>載入中…</b></div>
 </section>
@@ -279,10 +298,20 @@ function dueLabel(due) {
 }
 
 let showingDone = false;
+let allTodos = [];
 
-function renderTodos(rows) {
+function match(text, needle) {
+  return !needle || String(text || "").toLowerCase().includes(needle);
+}
+
+function renderTodos(list) {
+  allTodos = list;
+  const needle = $("search-todo").value.trim().toLowerCase();
+  const rows = allTodos.filter((row) => match(row.title, needle) || match(row.category, needle));
+
   $("list-todo").innerHTML = "";
   if (!rows.length) {
+    if (needle) return note("todo", "沒有符合的待辦", `「${needle}」在這個檢視裡找不到。`);
     return note("todo",
       showingDone ? "還沒有完成任何事" : "清單是空的",
       showingDone ? "打勾之後會出現在這裡。" : "上面打一句話就能新增。");
@@ -362,6 +391,10 @@ $("chips-todo").onclick = (event) => {
   const flag = event.target.dataset && event.target.dataset.done;
   if (flag !== undefined) setTodoView(flag === "1");
 };
+
+// 清單已經全在手上，搜尋就地過濾，不必再打一次 API
+$("search-todo").oninput = () => renderTodos(allTodos);
+$("search-sop").oninput = () => renderSops(allSops);
 
 // --- 行程 ---
 
@@ -546,12 +579,18 @@ function renderSops(sops) {
   allSops = sops;
   renderSopChips();
 
-  const rows = allSops.filter((row) =>
-    !sopFilter || (sopFilter === "__none__" ? !row.category : row.category === sopFilter));
+  const needle = $("search-sop").value.trim().toLowerCase();
+  const rows = allSops.filter((row) => {
+    const inCategory =
+      !sopFilter || (sopFilter === "__none__" ? !row.category : row.category === sopFilter);
+    const hit = match(row.name, needle) || row.aliases.some((alias) => match(alias, needle));
+    return inCategory && hit;
+  });
 
   const wrap = $("list-sop");
   wrap.innerHTML = "";
   if (!rows.length) {
+    if (needle) return note("sop", "沒有符合的流程", `找不到「${needle}」。`);
     if (sopFilter) return note("sop", "這個分類還沒有流程", "換一個分類看看。");
     return note("sop", "還沒有任何流程",
       "在對話裡打「流程 收班流程」，換行後每行一個步驟就能建立。");
@@ -686,10 +725,95 @@ function sopCard(row) {
 
 // --- 分頁 ---
 
+// 記帳快捷：一按就把項目、分類、金額填好，通常直接送出就對了
+async function loadShortcuts() {
+  const chips = $("chips-expense");
+  let items = [];
+  try {
+    items = await api("/expenses/frequent");
+  } catch (error) {
+    return (chips.hidden = true);
+  }
+  chips.hidden = !items.length;
+  chips.innerHTML = "";
+  for (const entry of items) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = entry.item;
+    const hint = document.createElement("span");
+    hint.textContent = money(entry.amount);
+    button.appendChild(hint);
+    button.onclick = () => {
+      $("expense-item").value = entry.item;
+      $("expense-amount").value = entry.amount;
+      if ([...$("expense-cat").options].some((option) => option.value === entry.category)) {
+        $("expense-cat").value = entry.category;
+      }
+      $("expense-item").dispatchEvent(new Event("input"));  // 讓送出鈕解鎖
+    };
+    chips.appendChild(button);
+  }
+}
+
+// 記帳搜尋要跨月份，資料不在手上，得問後端
+async function searchExpenses() {
+  const needle = $("search-expense").value.trim();
+  const out = $("result-expense");
+  out.innerHTML = "";
+  $("list-expense").hidden = Boolean(needle);
+  $("expense-summary").hidden = Boolean(needle);
+  $("chips-expense").hidden = Boolean(needle);
+  if (!needle) return renderExpenses(await api("/expenses"));
+
+  hideNote("expense");
+  const found = document.createElement("div");
+  found.className = "found";
+  found.textContent = "搜尋中…";
+  out.appendChild(found);
+
+  try {
+    const data = await api("/expenses/search?q=" + encodeURIComponent(needle));
+    if (!data.count) {
+      found.textContent = `過去一年沒有符合「${needle}」的紀錄。`;
+      return;
+    }
+    found.innerHTML = "";
+    found.append(
+      document.createTextNode(`「${needle}」共 ${data.count} 筆，合計 `),
+      Object.assign(document.createElement("b"), { textContent: money(data.total) }));
+
+    for (const row of data.rows) {
+      const item = document.createElement("li");
+      const when = document.createElement("div");
+      when.className = "when";
+      when.textContent = row.date.slice(2).replace(/-/g, "/");
+      const body = document.createElement("div");
+      body.className = "body";
+      const title = document.createElement("div");
+      title.className = "title";
+      title.textContent = row.item;
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = money(row.amount) + " · " + row.category;
+      body.append(title, meta);
+      item.append(when, body);
+      out.appendChild(item);
+    }
+  } catch (error) {
+    found.textContent = "搜尋失敗：" + error.message;
+  }
+}
+
+$("search-expense").onchange = searchExpenses;
+$("search-expense").onsearch = searchExpenses;
+
 const LOADERS = {
   todo: async () => renderTodos(await api("/todos")),
   event: async () => renderEvents(await api("/events")),
-  expense: async () => renderExpenses(await api("/expenses")),
+  expense: async () => {
+    renderExpenses(await api("/expenses"));
+    await loadShortcuts();
+  },
   sop: async () => renderSops(await api("/sops")),
 };
 const loaded = {};
