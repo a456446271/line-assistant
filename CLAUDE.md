@@ -24,6 +24,7 @@
 - `NOTION_TODO_DB_ID` 與 `NOTION_SOP_DB_ID` 是選填的，用 `todo_api.enabled()`／`sop_api.enabled()` 判斷。新增相關程式碼都要先檢查，否則沒設的人會壞掉。agent 的工具清單也是照這個條件動態組的。
 - 加新的 Notion 資料庫時，**integration 的連線權限不會自己擴散**，每個資料庫都要在 Notion 頁面裡各自加一次，否則 404。`scripts/check_notion.py` 會逐一檢查並指出是哪一個。
 - **LIFF 的 `/api/*` 端點只靠 ID token 擋外人**。webhook 有 channel secret 的簽章，但 `/api` 是瀏覽器直接打的，沒有那層保護。`_liff_user()` 是唯一的門：驗 token → 比對 `ALLOWED_USER_IDS`。新增任何 `/api` 端點都要先呼叫它，漏掉等於把資料公開在網路上。
-- **驗 ID token 一定要帶 audience**（`client_id=LINE_CHANNEL_ID`），否則別的 channel 發的 token 也會通過。驗證送去 LINE 的 `/oauth2/v2.1/verify` 而不是自己解 JWT，簽章與有效期就不會自己實作錯。
-- `LIFF_ID` 與 `LINE_CHANNEL_ID` 少一個就整個停用（`config.LIFF_ENABLED` 為 False，端點回 404），不會半開著跑。
+- **驗 ID token 一定要帶 audience**（`client_id=LINE_LOGIN_CHANNEL_ID`），否則別的 channel 發的 token 也會通過。驗證送去 LINE 的 `/oauth2/v2.1/verify` 而不是自己解 JWT，簽章與有效期就不會自己實作錯。
+- **LIFF 掛在 LINE Login channel，不是 Messaging API channel**（LINE 已經不允許後者）。所以 audience 是 Login channel 的 id，`LINE_LOGIN_CHANNEL_ID` 這個名字就是為了不要填錯。那個 Login channel 必須跟 Messaging API channel 同一個 Provider，否則 ID token 的 `sub` 會跟 `ALLOWED_USER_IDS` 裡的 user id 對不起來。
+- `LIFF_ID` 與 `LINE_LOGIN_CHANNEL_ID` 少一個就整個停用（`config.LIFF_ENABLED` 為 False，端點回 404），不會半開著跑。
 - **Rich Menu 的圖不要用 ✓ ▤ 這類符號**，微軟正黑體沒有那些字形，會印成豆腐塊。`scripts/setup_richmenu.py` 改用色點。Pillow 只有那支腳本要用，不要加進 `requirements.txt`（Render 上永遠不會執行它）。

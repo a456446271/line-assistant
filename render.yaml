@@ -33,7 +33,7 @@ services:
       # 選填。兩個都設了才會啟用 LIFF 待辦網頁。
       - key: LIFF_ID
         sync: false
-      - key: LINE_CHANNEL_ID
+      - key: LINE_LOGIN_CHANNEL_ID
         sync: false
       - key: CRON_SECRET
         sync: false

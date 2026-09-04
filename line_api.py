@@ -292,13 +292,16 @@ def verify_id_token(id_token: str) -> str:
     刻意送去 LINE 的 verify 端點而不是自己解 JWT：簽章、有效期與 audience
     都由 LINE 檢查，這裡不必自己實作也就不會實作錯。
     audience 一定要帶，否則別的 channel 發的 token 也會通過。
+
+    這裡的 client_id 是 LINE Login channel 的 id（LIFF 掛在那邊），
+    不是 Messaging API channel 的，填錯會一律驗不過。
     """
-    if not id_token or not config.LINE_CHANNEL_ID:
+    if not id_token or not config.LINE_LOGIN_CHANNEL_ID:
         return ""
     try:
         response = httpx.post(
             "https://api.line.me/oauth2/v2.1/verify",
-            data={"id_token": id_token, "client_id": config.LINE_CHANNEL_ID},
+            data={"id_token": id_token, "client_id": config.LINE_LOGIN_CHANNEL_ID},
             timeout=10,
         )
     except httpx.HTTPError:

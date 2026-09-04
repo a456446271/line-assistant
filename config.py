@@ -33,11 +33,17 @@ LINE_CHANNEL_ACCESS_TOKEN = _get("LINE_CHANNEL_ACCESS_TOKEN")
 ALLOWED_USER_IDS = [uid for uid in _get("ALLOWED_USER_IDS").split(",") if uid.strip()]
 
 # --- LIFF（在 LINE 裡開的待辦網頁）---
-# 兩個都設了才會啟用。LINE_CHANNEL_ID 是驗證 ID token 用的 audience，
+# 兩個都設了才會啟用。LINE_LOGIN_CHANNEL_ID 是驗證 ID token 用的 audience，
 # 沒有它就無法確認打進 /api 的人是誰，那等於把待辦清單公開在網路上。
+#
+# 注意這是 **LINE Login** channel 的 id，不是 Messaging API channel 的。
+# LINE 已經不允許把 LIFF 加在 Messaging API channel 上，必須另開一個
+# LINE Login channel，而 ID token 的 audience 是後者。
+# 那個 Login channel 一定要跟 Messaging API channel 在**同一個 Provider** 底下，
+# 否則拿到的 user id 會跟 ALLOWED_USER_IDS 對不起來，每次都被擋。
 LIFF_ID = _get("LIFF_ID")
-LINE_CHANNEL_ID = _get("LINE_CHANNEL_ID")
-LIFF_ENABLED = bool(LIFF_ID and LINE_CHANNEL_ID)
+LINE_LOGIN_CHANNEL_ID = _get("LINE_LOGIN_CHANNEL_ID")
+LIFF_ENABLED = bool(LIFF_ID and LINE_LOGIN_CHANNEL_ID)
 LIFF_URL = f"https://liff.line.me/{LIFF_ID}" if LIFF_ID else ""
 
 # --- Google Calendar ---

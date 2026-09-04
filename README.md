@@ -226,9 +226,16 @@ https://你的網址/cron?key=<CRON_SECRET>&job=monthly   每月 1 號 08:30（�
 這兩個是選填的，但加了之後待辦才真的好用：聊天室下方常駐四顆按鈕，
 點「待辦」直接開一頁清單，勾選、新增、刪除都在同一頁，不用先打字。
 
-**1. 建 LIFF 應用程式**
+**1. 另開一個 LINE Login channel**
 
-LINE Developers → 你的 Messaging API channel → **LIFF** 分頁 → Add：
+**LIFF 不能加在 Messaging API channel 上**——LINE 已經擋掉，那一頁只會顯示
+「Use a LINE Login channel」。要在 LINE Developers 建一個新的 **LINE Login** channel：
+
+- **一定要選跟 Messaging API channel 同一個 Provider**。不同 Provider 拿到的
+  user id 不一樣，會跟 `ALLOWED_USER_IDS` 對不起來，每次都被擋在門外。
+- App types 勾 **Web app**。
+
+**2. 在那個 Login channel 建 LIFF**
 
 | 欄位 | 填什麼 |
 |---|---|
@@ -237,10 +244,11 @@ LINE Developers → 你的 Messaging API channel → **LIFF** 分頁 → Add：
 | Endpoint URL | `https://你的網址/liff` |
 | Scopes | **一定要勾 `openid`**，沒勾就拿不到身分，網頁會顯示「拿不到登入資訊」 |
 
-建好之後複製 **LIFF ID** 填進 `LIFF_ID`。
-再到同一個 channel 的 **Basic settings** 複製 **Channel ID** 填進 `LINE_CHANNEL_ID`。
+建好之後複製 **LIFF ID** 填進 `LIFF_ID`，
+再到那個 **Login channel** 的 Basic settings 複製 **Channel ID** 填進 `LINE_LOGIN_CHANNEL_ID`
+（不是 Messaging API channel 的 id，填錯會一律驗不過）。
 
-`LINE_CHANNEL_ID` 不是可有可無的：`/api/todos` 那幾個端點是瀏覽器直接打的，
+`LINE_LOGIN_CHANNEL_ID` 不是可有可無的：`/api/todos` 那幾個端點是瀏覽器直接打的，
 沒有 webhook 的簽章可以擋外人，只能靠驗證 LIFF 的 ID token。
 驗證時一定要帶 audience，否則別的 channel 發的 token 也會通過。
 兩個變數少一個，整個 LIFF 就會停用（回 404），不會半開著。
