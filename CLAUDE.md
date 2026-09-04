@@ -30,3 +30,5 @@
 - **LIFF 掛在 LINE Login channel，不是 Messaging API channel**（LINE 已經不允許後者）。所以 audience 是 Login channel 的 id，`LINE_LOGIN_CHANNEL_ID` 這個名字就是為了不要填錯。那個 Login channel 必須跟 Messaging API channel 同一個 Provider，否則 ID token 的 `sub` 會跟 `ALLOWED_USER_IDS` 裡的 user id 對不起來。
 - `LIFF_ID` 與 `LINE_LOGIN_CHANNEL_ID` 少一個就整個停用（`config.LIFF_ENABLED` 為 False，端點回 404），不會半開著跑。
 - **Rich Menu 的圖不要用 ✓ ▤ 這類符號**，微軟正黑體沒有那些字形，會印成豆腐塊。`scripts/setup_richmenu.py` 改用色點。Pillow 只有那支腳本要用，不要加進 `requirements.txt`（Render 上永遠不會執行它）。
+- **流程的打勾進度存在瀏覽器 localStorage，不存 Notion**。那是「今天做到哪」的暫時狀態，不是資料。key 綁當天日期，隔天自動歸零——收班這種每天重跑的流程，昨天的勾今天不該還在。存取一律包 try/catch，無痕模式讀寫會丟例外，但那不該讓人連步驟都看不到。
+- **LIFF 的待辦分頁有兩種檢視**（未完成／已完成），`showingDone` 決定該打哪條路由。新增與刪除的回傳固定是未完成清單，所以在已完成檢視下要自己重抓，否則畫面會拿錯清單去畫。改這一塊時先確認兩種檢視都對。

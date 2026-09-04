@@ -75,6 +75,15 @@ def delete_todo(page_id: str) -> str:
     return title
 
 
+def uncomplete_todo(page_id: str) -> str:
+    """把打勾的待辦還原成未完成。按錯的時候用。"""
+    updated = notion.patch(
+        f"/pages/{page_id}",
+        {"properties": {PROP_DONE: {"checkbox": False}, PROP_DONE_AT: {"date": None}}},
+    )
+    return notion.title_of(updated)
+
+
 def _row(page: dict) -> dict | None:
     """把一頁轉成清單用的資料。沒有標題的空白列回 None——在 LINE 上既顯示不了也按不了。"""
     props = page["properties"]
@@ -83,11 +92,13 @@ def _row(page: dict) -> dict | None:
         return None
 
     due = props.get(PROP_DUE, {}).get("date")
+    done_at = props.get(PROP_DONE_AT, {}).get("date")
     category = props.get(PROP_CATEGORY, {}).get("select")
     return {
         "page_id": page["id"],
         "title": title,
         "due": date.fromisoformat(due["start"][:10]) if due else None,
+        "done_at": date.fromisoformat(done_at["start"][:10]) if done_at else None,
         "category": category["name"] if category else "",
     }
 
@@ -105,6 +116,21 @@ def open_todos(limit: int = 100) -> list[dict]:
     rows = [row for page in pages if (row := _row(page))]
     rows.sort(key=lambda row: (row["due"] is None, row["due"] or date.max, row["title"]))
     return rows[:limit]
+
+
+def done_todos(limit: int = 50) -> list[dict]:
+    """最近完成的待辦，新的排前面。
+
+    打勾之後就從清單消失，回顧不了做過什麼——這個是給那個用的。
+    """
+    pages = notion.query_all(
+        config.NOTION_TODO_DB_ID,
+        {
+            "filter": {"property": PROP_DONE, "checkbox": {"equals": True}},
+            "sorts": [{"property": PROP_DONE_AT, "direction": "descending"}],
+        },
+    )
+    return [row for page in pages if (row := _row(page))][:limit]
 
 
 def due_by(day: date) -> list[dict]:

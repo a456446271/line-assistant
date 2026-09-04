@@ -97,23 +97,38 @@ def _liff_user(id_token: str) -> str:
     return user_id
 
 
+def _row_json(row: dict) -> dict:
+    return {
+        "page_id": row["page_id"],
+        "title": row["title"],
+        "due": row["due"].isoformat() if row["due"] else None,
+        "done_at": row["done_at"].isoformat() if row["done_at"] else None,
+        "category": row["category"],
+    }
+
+
 def _todo_json() -> list[dict]:
     """回傳目前的未完成清單。每個寫入 API 都回這個，前端就不必自己維護狀態。"""
-    return [
-        {
-            "page_id": row["page_id"],
-            "title": row["title"],
-            "due": row["due"].isoformat() if row["due"] else None,
-            "category": row["category"],
-        }
-        for row in todo_api.open_todos()
-    ]
+    return [_row_json(row) for row in todo_api.open_todos()]
 
 
 @app.get("/api/todos")
 def api_list_todos(x_line_id_token: str = Header("")) -> list[dict]:
     _liff_user(x_line_id_token)
     return _todo_json()
+
+
+@app.get("/api/todos/done")
+def api_list_done_todos(x_line_id_token: str = Header("")) -> list[dict]:
+    _liff_user(x_line_id_token)
+    return [_row_json(row) for row in todo_api.done_todos()]
+
+
+@app.post("/api/todos/{page_id}/undone")
+def api_uncomplete_todo(page_id: str, x_line_id_token: str = Header("")) -> list[dict]:
+    _liff_user(x_line_id_token)
+    todo_api.uncomplete_todo(page_id)
+    return [_row_json(row) for row in todo_api.done_todos()]
 
 
 @app.post("/api/todos")
@@ -204,6 +219,21 @@ def api_add_event(payload: dict = Body(...), x_line_id_token: str = Header("")) 
         str(payload.get("location") or ""),
     )
     return _events_json()
+
+
+@app.get("/api/free")
+def api_free_slots(
+    days: int = 7, minutes: int = 60, x_line_id_token: str = Header("")
+) -> list[dict]:
+    """工作時段內長度足夠的空檔。班表在行事曆裡，所以上班時間會自動被扣掉。"""
+    _liff_user(x_line_id_token)
+    today = datetime.now(config.TZ).date()
+    slots = calendar_api.find_free_slots(
+        today, today + timedelta(days=max(1, min(days, 30)) - 1), max(15, minutes)
+    )
+    return [
+        {"start": begin.isoformat(), "end": finish.isoformat()} for begin, finish in slots
+    ]
 
 
 @app.delete("/api/events/{event_id}")
