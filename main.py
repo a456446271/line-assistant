@@ -149,6 +149,137 @@ def api_delete_todo(page_id: str, x_line_id_token: str = Header("")) -> list[dic
     return _todo_json()
 
 
+# --- LIFF：行程 ---
+#
+# 網頁上新增行程刻意不走確認卡片，跟對話的規矩不同。
+# 卡片的存在是為了防「AI 把話解讀錯」，但這裡的日期時間是使用者自己在
+# 表單上選的，沒有任何解讀的空間，表單本身就是確認。
+
+_EVENT_DAYS = 21
+
+
+def _events_json() -> list[dict]:
+    now = datetime.now(config.TZ)
+    start = datetime.combine(now.date(), time.min, config.TZ)
+    events = calendar_api.list_events(start, start + timedelta(days=_EVENT_DAYS))
+    return [
+        {
+            "id": event["id"],
+            "title": event["title"],
+            "start": event["start"].isoformat(),
+            "end": event["end"].isoformat(),
+            "all_day": event["all_day"],
+            "location": event["location"],
+        }
+        for event in events
+    ]
+
+
+@app.get("/api/events")
+def api_list_events(x_line_id_token: str = Header("")) -> list[dict]:
+    _liff_user(x_line_id_token)
+    return _events_json()
+
+
+@app.post("/api/events")
+def api_add_event(payload: dict = Body(...), x_line_id_token: str = Header("")) -> list[dict]:
+    _liff_user(x_line_id_token)
+    title = str(payload.get("title") or "").strip()
+    day = str(payload.get("date") or "").strip()
+    if not title or not day:
+        raise HTTPException(status_code=400, detail="標題和日期都要填")
+
+    # 沒填時間就當整天行程——生日、休假這種本來就沒有時間點
+    clock = str(payload.get("time") or "").strip()
+    if not clock:
+        calendar_api.create_event(title, day, day, all_day=True)
+        return _events_json()
+
+    begin = datetime.fromisoformat(f"{day}T{clock}").replace(tzinfo=config.TZ)
+    minutes = int(payload.get("minutes") or 60)
+    calendar_api.create_event(
+        title,
+        begin.isoformat(),
+        (begin + timedelta(minutes=minutes)).isoformat(),
+        str(payload.get("location") or ""),
+    )
+    return _events_json()
+
+
+@app.delete("/api/events/{event_id}")
+def api_delete_event(event_id: str, x_line_id_token: str = Header("")) -> list[dict]:
+    _liff_user(x_line_id_token)
+    calendar_api.delete_event(event_id)
+    return _events_json()
+
+
+# --- LIFF：記帳 ---
+
+
+def _expenses_json(month: str) -> dict:
+    start, end = agent._month_range(month)
+    rows = expense_api.query_expenses(start, end)
+    totals = expense_api.totals_by_category(rows)
+    return {
+        "month": f"{start:%Y-%m}",
+        "total": sum(totals.values()),
+        "totals": totals,
+        "budgets": config.BUDGETS,
+        "rows": list(reversed(rows)),  # 新的排前面，剛記的一眼就看到
+    }
+
+
+@app.get("/api/expenses")
+def api_list_expenses(month: str = "", x_line_id_token: str = Header("")) -> dict:
+    _liff_user(x_line_id_token)
+    return _expenses_json(month)
+
+
+@app.post("/api/expenses")
+def api_add_expense(payload: dict = Body(...), x_line_id_token: str = Header("")) -> dict:
+    _liff_user(x_line_id_token)
+    item = str(payload.get("item") or "").strip()
+    try:
+        amount = float(payload.get("amount"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="金額怪怪的")
+    if not item or amount <= 0:
+        raise HTTPException(status_code=400, detail="項目和金額都要填")
+
+    spent_on = str(payload.get("date") or "") or datetime.now(config.TZ).date().isoformat()
+    expense_api.add_expense(amount, str(payload.get("category") or ""), item, spent_on)
+    return _expenses_json(spent_on[:7])
+
+
+@app.delete("/api/expenses/{page_id}")
+def api_delete_expense(
+    page_id: str, month: str = "", x_line_id_token: str = Header("")
+) -> dict:
+    _liff_user(x_line_id_token)
+    expense_api.archive_expense(page_id)
+    return _expenses_json(month)
+
+
+# --- LIFF：流程 ---
+
+
+@app.get("/api/sops")
+def api_list_sops(x_line_id_token: str = Header("")) -> list[dict]:
+    _liff_user(x_line_id_token)
+    if not sop_api.enabled():
+        return []
+    return [
+        {"page_id": sop["page_id"], "name": sop["name"], "aliases": sop["aliases"]}
+        for sop in sop_api.list_sops(force=True)
+    ]
+
+
+@app.get("/api/sops/{page_id}")
+def api_get_sop(page_id: str, x_line_id_token: str = Header("")) -> dict:
+    _liff_user(x_line_id_token)
+    return {"steps": sop_api.steps(page_id)}
+
+
 # --- Webhook ---
 
 

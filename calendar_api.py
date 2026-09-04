@@ -127,6 +127,18 @@ def create_event(
     return {"id": created["id"], "link": created.get("htmlLink", "")}
 
 
+def delete_event(event_id: str) -> None:
+    """刪掉一個行程。
+
+    Google 沒有「封存」這種中間狀態，這是真的刪掉，救不回來。
+    所以只從 LIFF 網頁按得到——那邊是點著清單上某一列刪的，
+    不會有「AI 猜錯是哪一個」的問題。
+    """
+    _service().events().delete(
+        calendarId=config.GOOGLE_CALENDAR_ID, eventId=event_id
+    ).execute()
+
+
 def _busy_intervals(start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
     """算出忙碌區間。
 
