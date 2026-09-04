@@ -269,9 +269,26 @@ def api_list_sops(x_line_id_token: str = Header("")) -> list[dict]:
     if not sop_api.enabled():
         return []
     return [
-        {"page_id": sop["page_id"], "name": sop["name"], "aliases": sop["aliases"]}
+        {
+            "page_id": sop["page_id"],
+            "name": sop["name"],
+            "aliases": sop["aliases"],
+            "category": sop["category"],
+        }
         for sop in sop_api.list_sops(force=True)
     ]
+
+
+@app.post("/api/sops")
+def api_add_sop(payload: dict = Body(...), x_line_id_token: str = Header("")) -> list[dict]:
+    _liff_user(x_line_id_token)
+    name = str(payload.get("name") or "").strip()
+    lines = [line for line in str(payload.get("steps") or "").splitlines() if line.strip()]
+    if not name or not lines:
+        raise HTTPException(status_code=400, detail="名稱和步驟都要填")
+
+    sop_api.add_sop(name, lines, str(payload.get("category") or ""))
+    return api_list_sops(x_line_id_token)
 
 
 @app.get("/api/sops/{page_id}")

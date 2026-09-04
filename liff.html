@@ -36,10 +36,13 @@
   .card + .card, .card + ul, ul + .card { margin-top: 10px; }
 
   form { display: flex; flex-wrap: wrap; gap: 8px; }
-  form input, form select {
+  form input, form select, form textarea {
     padding: 10px 12px; font-size: 16px; min-width: 0;
     border: 1px solid #d1d1d6; border-radius: 10px; background: #fff;
+    font-family: inherit; resize: vertical;
   }
+  details summary { font-size: 14px; color: var(--dim); cursor: pointer; }
+  details[open] summary { margin-bottom: 10px; }
   form .wide { flex: 1 1 100%; }
   form .half { flex: 1 1 calc(50% - 4px); }
   form button[type=submit] {
@@ -79,6 +82,15 @@
 
   .step { display: flex; gap: 8px; font-size: 14px; margin-top: 7px; }
   .step span:first-child { color: var(--dim); flex: 0 0 18px; }
+
+  /* 分類過濾。橫向捲動，分類再多也不會擠成兩行 */
+  .chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; margin-bottom: 10px; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chips button {
+    flex: 0 0 auto; padding: 6px 13px; font-size: 13px; white-space: nowrap;
+    border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--dim);
+  }
+  .chips button[aria-pressed=true] { background: var(--ink); border-color: var(--ink); color: #fff; }
 
   .note { padding: 34px 24px; text-align: center; color: var(--dim); }
   .note b { display: block; color: var(--ink); margin-bottom: 6px; font-size: 16px; }
@@ -139,6 +151,18 @@
 </section>
 
 <section class="pane" id="pane-sop" hidden>
+  <!-- 流程主要是拿來看的，新增很偶爾，所以收起來不佔版面 -->
+  <details class="card" id="add-sop">
+    <summary>＋ 新增流程</summary>
+    <form id="form-sop">
+      <input class="half" id="sop-name" type="text" placeholder="流程名稱" autocomplete="off">
+      <input class="half" id="sop-cat" list="sop-cats" placeholder="分類" autocomplete="off">
+      <datalist id="sop-cats"></datalist>
+      <textarea class="wide" id="sop-steps" rows="5" placeholder="一行一個步驟&#10;結帳對帳&#10;關展示機電源&#10;鎖後門"></textarea>
+      <button type="submit" disabled>建立</button>
+    </form>
+  </details>
+  <div class="chips" id="chips-sop" hidden></div>
   <div id="list-sop"></div>
   <div class="note" id="note-sop"><b>載入中…</b></div>
 </section>
@@ -388,10 +412,55 @@ function renderExpenses(data) {
 
 // --- 流程 ---
 
-function renderSops(rows) {
+let allSops = [];
+let sopFilter = "";
+
+function renderSopChips() {
+  const chips = $("chips-sop");
+  const names = [...new Set(allSops.map((row) => row.category).filter(Boolean))];
+
+  // 新增表單的分類建議用現有的，打新的也可以
+  const list = $("sop-cats");
+  list.innerHTML = "";
+  for (const name of names) list.appendChild(new Option(name, name));
+
+  const hasUncategorised = allSops.some((row) => !row.category);
+
+  // 只有一種分類時過濾器沒有意義，藏起來省版面
+  if (names.length + (hasUncategorised ? 1 : 0) < 2) {
+    chips.hidden = true;
+    return;
+  }
+
+  const options = [["", "全部"], ...names.map((name) => [name, name])];
+  if (hasUncategorised) options.push(["__none__", "未分類"]);
+
+  chips.hidden = false;
+  chips.innerHTML = "";
+  for (const [value, label] of options) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.setAttribute("aria-pressed", String(value === sopFilter));
+    button.onclick = () => {
+      sopFilter = value;
+      renderSops(allSops);
+    };
+    chips.appendChild(button);
+  }
+}
+
+function renderSops(sops) {
+  allSops = sops;
+  renderSopChips();
+
+  const rows = allSops.filter((row) =>
+    !sopFilter || (sopFilter === "__none__" ? !row.category : row.category === sopFilter));
+
   const wrap = $("list-sop");
   wrap.innerHTML = "";
   if (!rows.length) {
+    if (sopFilter) return note("sop", "這個分類還沒有流程", "換一個分類看看。");
     return note("sop", "還沒有任何流程",
       "在對話裡打「流程 收班流程」，換行後每行一個步驟就能建立。");
   }
@@ -407,10 +476,14 @@ function renderSops(rows) {
     title.textContent = row.name;
     card.appendChild(title);
 
-    if (row.aliases.length) {
+    // 看「全部」時要看得出各自屬於哪一類，已經篩過了就不用重複講
+    const bits = [];
+    if (row.category && !sopFilter) bits.push(row.category);
+    if (row.aliases.length) bits.push("也叫：" + row.aliases.join("、"));
+    if (bits.length) {
       const meta = document.createElement("div");
       meta.className = "meta";
-      meta.textContent = "也叫：" + row.aliases.join("、");
+      meta.textContent = bits.join(" · ");
       card.appendChild(meta);
     }
 
@@ -543,6 +616,20 @@ wire("form-event", ["event-title", "event-date"], async () => {
   $("event-title").value = "";
   $("event-time").value = "";
   $("event-loc").value = "";
+});
+
+wire("form-sop", ["sop-name", "sop-steps"], async () => {
+  renderSops(await api("/sops", {
+    method: "POST",
+    body: JSON.stringify({
+      name: $("sop-name").value.trim(),
+      category: $("sop-cat").value.trim() || null,
+      steps: $("sop-steps").value,
+    }),
+  }));
+  $("sop-name").value = "";
+  $("sop-steps").value = "";
+  $("add-sop").open = false;
 });
 
 wire("form-expense", ["expense-item", "expense-amount"], async () => {

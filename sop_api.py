@@ -64,7 +64,15 @@ def list_sops(force: bool = False) -> list[dict]:
             continue
         alias_text = notion.plain(props.get(PROP_ALIAS, {}).get("rich_text", []))
         aliases = [part.strip() for part in re.split(r"[,，、/\s]+", alias_text) if part.strip()]
-        rows.append({"page_id": page["id"], "name": name, "aliases": aliases})
+        category = props.get(PROP_CATEGORY, {}).get("select")
+        rows.append(
+            {
+                "page_id": page["id"],
+                "name": name,
+                "aliases": aliases,
+                "category": category["name"] if category else "",
+            }
+        )
 
     _cache = (now, rows)
     return rows
