@@ -485,6 +485,17 @@ $("tabs").onclick = (event) => {
   if (tab) show(tab);
 };
 
+// Rich Menu 的每顆按鈕帶不同的 ?tab=，直接開到對應分頁。
+// LINE 有時候會把 query 包進 liff.state 再轉過來，兩種都要接。
+function wantedTab() {
+  const here = new URLSearchParams(location.search);
+  const direct = here.get("tab");
+  if (direct) return direct;
+  const state = here.get("liff.state");
+  if (state) return new URLSearchParams(state.replace(/^\?/, "")).get("tab");
+  return null;
+}
+
 // --- 表單 ---
 
 function wire(formId, fields, submit) {
@@ -560,7 +571,8 @@ wire("form-expense", ["expense-item", "expense-amount"], async () => {
     }
     $("event-date").value = new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
       .toISOString().slice(0, 10);
-    await show("todo");
+    const tab = wantedTab();
+    await show(LOADERS[tab] ? tab : "todo");
   } catch (error) {
     note("todo", "載入失敗", String(error.message || error));
   }

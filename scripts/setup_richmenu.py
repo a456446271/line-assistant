@@ -37,18 +37,19 @@ FONT_BOLD = "C:/Windows/Fonts/msjhbd.ttc"
 FONT_REGULAR = "C:/Windows/Fonts/msjh.ttc"
 
 # 版面順序是由左到右、由上到下。
-# action 是按下去要做的事：message 直接送出那句話，uri 開網頁。
+#
+# 四顆都開同一個網頁的不同分頁（?tab=），選單等於 App 的導覽列。
+# 原本有三顆是送出「今天有什麼安排」這類訊息，但網頁上線之後那些回覆
+# 一律比網頁差——「流程」只列得出名字，網頁點一下就能看步驟——
+# 留著只會讓人以為有兩套功能。要用講的就直接打字，那才是鍵盤的工作。
 #
 # 刻意不放 ✓ ▤ 這類圖示符號——微軟正黑體沒有那些字形，會印成豆腐塊。
 # 改用一個色點區分，● 是字型裡確定有的。
 BUTTONS = [
-    {"color": (6, 199, 85), "title": "待辦", "hint": "開清單", "action": "liff"},
-    {"color": (47, 111, 237), "title": "今天行程", "hint": "查行事曆",
-     "action": {"type": "message", "text": "今天有什麼安排"}},
-    {"color": (139, 92, 246), "title": "流程", "hint": "看有哪些",
-     "action": {"type": "message", "text": "流程"}},
-    {"color": (245, 158, 11), "title": "本月消費", "hint": "查記帳",
-     "action": {"type": "message", "text": "這個月花多少"}},
+    {"color": (6, 199, 85), "title": "待辦", "hint": "勾選・新增", "tab": "todo"},
+    {"color": (47, 111, 237), "title": "行程", "hint": "班表・新增", "tab": "event"},
+    {"color": (245, 158, 11), "title": "記帳", "hint": "本月・預算", "tab": "expense"},
+    {"color": (139, 92, 246), "title": "流程", "hint": "收班・調撥", "tab": "sop"},
 ]
 
 
@@ -87,17 +88,24 @@ def draw_image() -> Image.Image:
     return image
 
 
+# 沒設 LIFF 時的退路：送出這句話，用對話版的功能頂著
+_FALLBACK = {
+    "todo": "待辦",
+    "event": "今天有什麼安排",
+    "expense": "這個月花多少",
+    "sop": "流程",
+}
+
+
 def build_areas() -> list[dict]:
     areas = []
     for index, button in enumerate(BUTTONS):
         col, row = index % COLS, index // COLS
-        action = button["action"]
-        if action == "liff":
-            if not config.LIFF_URL:
-                # 沒設 LIFF 就退成送出「待辦」，一樣叫得出卡片
-                action = {"type": "message", "text": "待辦"}
-            else:
-                action = {"type": "uri", "uri": config.LIFF_URL}
+        tab = button["tab"]
+        if config.LIFF_URL:
+            action = {"type": "uri", "uri": f"{config.LIFF_URL}?tab={tab}"}
+        else:
+            action = {"type": "message", "text": _FALLBACK[tab]}
         areas.append(
             {
                 "bounds": {"x": col * CELL_W, "y": row * CELL_H, "width": CELL_W, "height": CELL_H},
