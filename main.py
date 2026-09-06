@@ -9,7 +9,7 @@ from __future__ import annotations
 import hmac
 import json
 import logging
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
@@ -30,6 +30,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("line-assistant")
 
 app = FastAPI(title="LINE 個人助理")
+
+# 這個行程是什麼時候起來的。Render 免費方案閒置 15 分鐘會休眠，醒來是全新的
+# 行程，所以這個值等於「距離上次睡著醒來過了多久」——保活到底有沒有在運作，
+# 看這個數字就知道，不必再靠猜的。
+_BOOTED_AT = datetime.now(timezone.utc)
 
 _ERROR_REPLY = "抱歉，剛剛出了點狀況，再說一次好嗎？"
 
@@ -61,6 +66,10 @@ def healthz() -> dict:
         "todo": todo_api.enabled(),
         "sop": sop_api.enabled(),
         "liff": config.LIFF_ENABLED,
+        # 醒著多久了。遠小於保活間隔就代表它剛睡醒，也就是保活沒在運作。
+        "uptime_minutes": round(
+            (datetime.now(timezone.utc) - _BOOTED_AT).total_seconds() / 60, 1
+        ),
     }
 
 
