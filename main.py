@@ -53,9 +53,15 @@ _NO_RULE_REPLY = (
 )
 
 
-@app.get("/healthz")
+@app.api_route("/healthz", methods=["GET", "HEAD"])
 def healthz() -> dict:
-    """健康檢查，順便回報設定狀態，方便遠端診斷。只回布林值與數量，不外洩任何值。"""
+    """健康檢查，順便回報設定狀態，方便遠端診斷。只回布林值與數量，不外洩任何值。
+
+    刻意也收 HEAD：保活服務用 GET 打過來時，如果服務正在休眠，回應的是
+    Render 自己那頁很大的「Application loading」HTML，cron-job.org 免費版
+    會判定「輸出過大」而算成失敗——連續失敗 25 次它就自動停用整個任務，
+    服務從此睡死。HEAD 不回 body，這個死法就不存在了。
+    """
     missing = config.check_config()
     return {
         "ok": not missing,
