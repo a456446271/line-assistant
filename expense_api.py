@@ -166,3 +166,25 @@ def totals_by_category(rows: list[dict]) -> dict[str, float]:
     for row in rows:
         totals[row["category"]] = totals.get(row["category"], 0) + row["amount"]
     return totals
+
+
+def update_expense(
+    page_id: str,
+    item: str | None = None,
+    amount: float | None = None,
+    category: str | None = None,
+    spent_on: str | None = None,
+) -> None:
+    """改一筆消費。只送有給的欄位，沒給的維持原樣。"""
+    properties: dict = {}
+    if item is not None:
+        properties[PROP_ITEM] = {"title": [{"text": {"content": item[:2000]}}]}
+    if amount is not None:
+        properties[PROP_AMOUNT] = {"number": amount}
+    if category is not None and category in config.CATEGORIES:
+        properties[PROP_CATEGORY] = {"select": {"name": category}}
+    if spent_on:
+        properties[PROP_DATE] = {"date": {"start": spent_on}}
+
+    if properties:
+        notion.patch(f"/pages/{page_id}", {"properties": properties})

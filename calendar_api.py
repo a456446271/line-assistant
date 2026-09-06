@@ -127,6 +127,53 @@ def create_event(
     return {"id": created["id"], "link": created.get("htmlLink", "")}
 
 
+def update_event(
+    event_id: str,
+    title: str,
+    start_iso: str,
+    end_iso: str,
+    location: str = "",
+    all_day: bool = False,
+) -> None:
+    """改一個行程。
+
+    整天與有時間的行程在 Google 眼裡是兩種格式（date 對 dateTime），
+    互相切換時舊的那個欄位不會自己消失，一定要明確送 None 清掉，
+    否則 Google 會回 400 說 start 同時有 date 和 dateTime。
+    """
+    if all_day:
+        start_date = date.fromisoformat(start_iso[:10])
+        end_date = date.fromisoformat(end_iso[:10]) if end_iso else start_date
+        body: dict = {
+            "summary": title,
+            "start": {"date": start_date.isoformat(), "dateTime": None, "timeZone": None},
+            "end": {
+                "date": (end_date + timedelta(days=1)).isoformat(),
+                "dateTime": None,
+                "timeZone": None,
+            },
+        }
+    else:
+        body = {
+            "summary": title,
+            "start": {
+                "dateTime": parse_dt(start_iso).isoformat(),
+                "timeZone": config.TIMEZONE,
+                "date": None,
+            },
+            "end": {
+                "dateTime": parse_dt(end_iso).isoformat(),
+                "timeZone": config.TIMEZONE,
+                "date": None,
+            },
+        }
+    body["location"] = location
+
+    _service().events().patch(
+        calendarId=config.GOOGLE_CALENDAR_ID, eventId=event_id, body=body
+    ).execute()
+
+
 def delete_event(event_id: str) -> None:
     """刪掉一個行程。
 

@@ -136,3 +136,33 @@ def done_todos(limit: int = 50) -> list[dict]:
 def due_by(day: date) -> list[dict]:
     """在指定日期（含）之前到期、而且還沒做完的待辦。"""
     return [row for row in open_todos() if row["due"] and row["due"] <= day]
+
+
+def update_todo(
+    page_id: str,
+    title: str | None = None,
+    due: date | None = None,
+    category: str | None = None,
+    clear_due: bool = False,
+) -> dict:
+    """改一筆待辦。只送有給的欄位，沒給的維持原樣。
+
+    清空期限要用 clear_due 明講，不能靠 due=None——那跟「這次不動期限」
+    在呼叫端是同一件事，分不出來就會不小心把使用者設好的期限洗掉。
+    """
+    properties: dict = {}
+    if title is not None:
+        properties[PROP_TITLE] = {"title": [{"text": {"content": title[:2000]}}]}
+    if clear_due:
+        properties[PROP_DUE] = {"date": None}
+    elif due is not None:
+        properties[PROP_DUE] = {"date": {"start": due.isoformat()}}
+    if category is not None:
+        properties[PROP_CATEGORY] = (
+            {"select": {"name": category}} if category in CATEGORIES else {"select": None}
+        )
+
+    if not properties:
+        return {"page_id": page_id}
+    notion.patch(f"/pages/{page_id}", {"properties": properties})
+    return {"page_id": page_id}

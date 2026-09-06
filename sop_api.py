@@ -122,9 +122,8 @@ def steps(page_id: str) -> list[str]:
     return [text for block in data.get("results", []) if (text := _block_text(block))]
 
 
-def add_sop(name: str, lines: list[str], category: str = "") -> dict:
-    """新增一份流程。每一行變成編號清單的一步。"""
-    children = [
+def _step_blocks(lines: list[str]) -> list[dict]:
+    return [
         {
             "object": "block",
             "type": "numbered_list_item",
@@ -135,6 +134,43 @@ def add_sop(name: str, lines: list[str], category: str = "") -> dict:
         for line in lines
         if (step := _LEADING_MARK.sub("", line).strip())
     ]
+
+
+def update_sop(
+    page_id: str,
+    name: str | None = None,
+    category: str | None = None,
+    lines: list[str] | None = None,
+) -> None:
+    """改一份流程。給了 lines 就整份步驟換掉。
+
+    Notion 沒有「一次替換所有子區塊」的 API，只能一塊一塊刪再重新加。
+    步驟通常十行以內，這個做法夠用，也比逐塊比對差異簡單得多。
+    """
+    properties: dict = {}
+    if name is not None:
+        properties[PROP_NAME] = {"title": [{"text": {"content": name[:2000]}}]}
+    if category is not None:
+        properties[PROP_CATEGORY] = (
+            {"select": {"name": category}} if category else {"select": None}
+        )
+    if properties:
+        notion.patch(f"/pages/{page_id}", {"properties": properties})
+
+    if lines is not None:
+        existing = notion.get(f"/blocks/{page_id}/children?page_size=100")
+        for block in existing.get("results", []):
+            notion.delete(f"/blocks/{block['id']}")
+        blocks = _step_blocks(lines)
+        if blocks:
+            notion.patch(f"/blocks/{page_id}/children", {"children": blocks})
+
+    _invalidate()
+
+
+def add_sop(name: str, lines: list[str], category: str = "") -> dict:
+    """新增一份流程。每一行變成編號清單的一步。"""
+    children = _step_blocks(lines)
 
     properties: dict = {PROP_NAME: {"title": [{"text": {"content": name}}]}}
     if category:

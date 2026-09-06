@@ -94,6 +94,26 @@
 
   .dayhead { margin: 16px 0 6px; font-size: 13px; font-weight: 600; color: var(--dim); }
   .dayhead:first-child { margin-top: 4px; }
+  /* 空白的日子也要列出來，才看得出哪幾天是空的。壓低存在感，不要跟有事的搶眼 */
+  .dayhead.empty { margin: 6px 0; font-weight: 400; color: #c3c3c8; }
+  .dayhead .rest { color: #c3c3c8; font-weight: 400; }
+
+  /* 就地編輯 */
+  .edit { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 8px;
+          background: #fff; color: var(--dim); font-size: 12px; padding: 4px 9px; }
+  .editing { display: block; }
+  .editing .row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .editing input, .editing select, .editing textarea {
+    width: 100%; padding: 9px 11px; font-size: 16px; min-width: 0;
+    border: 1px solid #d1d1d6; border-radius: 9px; background: #fff;
+    font-family: inherit; resize: vertical;
+  }
+  .editing .acts { display: flex; gap: 8px; }
+  .editing .acts button {
+    flex: 1; padding: 9px; border: 0; border-radius: 9px; font-weight: 600;
+    background: var(--green); color: #fff;
+  }
+  .editing .acts button.ghost { background: #ececed; color: var(--ink); font-weight: 400; }
 
   .sum { display: flex; align-items: baseline; justify-content: space-between; }
   .sum b { font-size: 26px; }
@@ -284,6 +304,84 @@ function delButton(onClick) {
   return button;
 }
 
+function smallButton(label, className, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = className;
+  button.textContent = label;
+  button.onclick = onClick;
+  return button;
+}
+
+// 就地編輯：把那一列整個換成表單，存檔後由回傳的清單重畫。
+// 四種資料的欄位不一樣，但操作邏輯一樣，所以只寫一份。
+// spec 每項：{key, type, value, options?, rows?, list?, placeholder?, half?}
+function inlineEdit(item, spec, save) {
+  const original = [...item.childNodes];
+  item.innerHTML = "";
+  item.className = "editing";
+
+  const inputs = {};
+  let row = null;
+  for (const field of spec) {
+    let node;
+    if (field.type === "select") {
+      node = document.createElement("select");
+      for (const option of field.options) {
+        node.add(new Option(option[1] ?? option, option[0] ?? option));
+      }
+      node.value = field.value ?? "";
+    } else if (field.type === "textarea") {
+      node = document.createElement("textarea");
+      node.rows = field.rows || 5;
+      node.value = field.value ?? "";
+    } else {
+      node = document.createElement("input");
+      node.type = field.type;
+      node.value = field.value ?? "";
+      if (field.placeholder) node.placeholder = field.placeholder;
+      if (field.list) node.setAttribute("list", field.list);
+    }
+    inputs[field.key] = node;
+
+    // half 的欄位兩兩併成一列，其他各自佔一整列
+    if (field.half && row && row.childElementCount === 1) {
+      row.appendChild(node);
+    } else {
+      row = document.createElement("div");
+      row.className = "row";
+      row.appendChild(node);
+      item.appendChild(row);
+    }
+    if (!field.half) row = null;
+  }
+
+  const restore = () => {
+    item.className = "";
+    item.innerHTML = "";
+    original.forEach((node) => item.appendChild(node));
+  };
+
+  const acts = document.createElement("div");
+  acts.className = "acts";
+  acts.append(
+    smallButton("取消", "ghost", restore),
+    smallButton("儲存", "", async () => {
+      const values = {};
+      for (const [key, node] of Object.entries(inputs)) values[key] = node.value;
+      acts.querySelectorAll("button").forEach((button) => (button.disabled = true));
+      try {
+        await save(values);
+      } catch (error) {
+        alert("儲存失敗：" + error.message);
+        acts.querySelectorAll("button").forEach((button) => (button.disabled = false));
+      }
+    }));
+  item.appendChild(acts);
+  const first = Object.values(inputs)[0];
+  if (first) first.focus();
+}
+
 // --- 待辦 ---
 
 function dueLabel(due) {
@@ -347,17 +445,27 @@ function renderTodos(list) {
 
     item.append(box, body);
 
-    // 未完成的才給「排」：把這件事丟到行程分頁的表單裡，順手訂個時間去做
+    // 未完成的才給這兩顆：已完成的東西沒有再排時間或改期限的意義
     if (!showingDone) {
-      const plan = document.createElement("button");
-      plan.type = "button";
-      plan.className = "plan";
-      plan.textContent = "排";
-      plan.onclick = () => {
+      item.appendChild(smallButton("改", "edit", () => inlineEdit(item, [
+        { key: "title", type: "text", value: row.title, placeholder: "事項" },
+        { key: "due", type: "date", value: row.due || "", half: true },
+        { key: "category", type: "select", value: row.category, half: true,
+          options: [["", "未分類"], "工作", "家裡", "購物", "其他"] },
+      ], async (values) => renderTodos(await api("/todos/" + row.page_id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          title: values.title.trim(),
+          due: values.due || null,
+          category: values.category,
+        }),
+      })))));
+
+      // 「排」把這件事丟到行程分頁的表單裡，順手訂個時間去做
+      item.appendChild(smallButton("排", "plan", () => {
         $("event-title").value = row.title;
         show("event");
-      };
-      item.appendChild(plan);
+      }));
     }
 
     item.appendChild(delButton(() => {
@@ -398,55 +506,96 @@ $("search-sop").oninput = () => renderSops(allSops);
 
 // --- 行程 ---
 
+const EVENT_DAYS = 21;
+
+function isoDay(when) {
+  return new Date(when.getTime() - when.getTimezoneOffset() * 60000)
+    .toISOString().slice(0, 10);
+}
+
+function eventRow(row) {
+  const start = new Date(row.start);
+  const item = document.createElement("li");
+
+  const when = document.createElement("div");
+  when.className = "when";
+  when.style.whiteSpace = "pre";
+  when.textContent = row.all_day
+    ? "整天"
+    : start.toTimeString().slice(0, 5) + "\n" + new Date(row.end).toTimeString().slice(0, 5);
+
+  const body = document.createElement("div");
+  body.className = "body";
+  const title = document.createElement("div");
+  title.className = "title";
+  title.textContent = row.title;
+  body.appendChild(title);
+  if (row.location) {
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = row.location;
+    body.appendChild(meta);
+  }
+
+  const minutes = Math.round((new Date(row.end) - start) / 60000);
+  item.append(when, body, smallButton("改", "edit", () => inlineEdit(item, [
+    { key: "title", type: "text", value: row.title, placeholder: "行程名稱" },
+    { key: "date", type: "date", value: row.start.slice(0, 10), half: true },
+    { key: "time", type: "time", value: row.all_day ? "" : row.start.slice(11, 16), half: true },
+    { key: "minutes", type: "select", value: String(minutes), half: true,
+      options: [["30", "30 分鐘"], ["60", "1 小時"], ["90", "1.5 小時"],
+                ["120", "2 小時"], ["180", "3 小時"], ["480", "8 小時"],
+                [String(minutes), minutes + " 分鐘"]] },
+    { key: "location", type: "text", value: row.location, half: true, placeholder: "地點" },
+  ], async (values) => renderEvents(await api("/events/" + encodeURIComponent(row.id), {
+    method: "PATCH",
+    body: JSON.stringify({
+      title: values.title.trim(),
+      date: values.date,
+      time: values.time || null,   // 清空時間就變成整天行程
+      minutes: Number(values.minutes),
+      location: values.location.trim(),
+    }),
+  })))));
+
+  item.appendChild(delButton(() => {
+    // 行事曆的刪除是真的刪掉，救不回來，所以問清楚一點
+    if (confirm(`從行事曆刪掉「${row.title}」？\n這個救不回來。`)) {
+      act(item, async () => renderEvents(
+        await api("/events/" + encodeURIComponent(row.id), { method: "DELETE" })));
+    }
+  }));
+  return item;
+}
+
 function renderEvents(rows) {
   const wrap = $("list-event");
   wrap.innerHTML = "";
-  if (!rows.length) return note("event", "未來三週沒有行程", "上面可以直接加一個。");
   hideNote("event");
 
-  let lastDay = "";
-  for (const row of rows) {
-    const start = new Date(row.start);
-    const day = row.start.slice(0, 10);
-    if (day !== lastDay) {
-      lastDay = day;
-      const head = document.createElement("div");
-      head.className = "dayhead";
-      const days = Math.round((new Date(day + "T00:00:00") - today0()) / 86400000);
-      const name = days === 0 ? "今天" : days === 1 ? "明天" : "";
-      head.textContent =
-        `${start.getMonth() + 1}/${start.getDate()}（${WEEK[start.getDay()]}）${name && " · " + name}`;
-      wrap.appendChild(head);
+  // 每一天都列出來，沒事的日子只留一行日期。
+  // 只列有事的話看不出哪幾天是空的，而「哪天有空」正是最常想知道的事。
+  const byDay = {};
+  for (const row of rows) (byDay[row.start.slice(0, 10)] ||= []).push(row);
+
+  for (let offset = 0; offset < EVENT_DAYS; offset++) {
+    const when = new Date(today0().getTime() + offset * 86400000);
+    const key = isoDay(when);
+    const todays = byDay[key] || [];
+
+    const head = document.createElement("div");
+    head.className = "dayhead" + (todays.length ? "" : " empty");
+    const name = offset === 0 ? " · 今天" : offset === 1 ? " · 明天" : "";
+    head.textContent = `${when.getMonth() + 1}/${when.getDate()}（${WEEK[when.getDay()]}）${name}`;
+    if (!todays.length) {
+      const rest = document.createElement("span");
+      rest.className = "rest";
+      rest.textContent = "　—";
+      head.appendChild(rest);
     }
+    wrap.appendChild(head);
 
-    const item = document.createElement("li");
-    const when = document.createElement("div");
-    when.className = "when";
-    when.textContent = row.all_day
-      ? "整天"
-      : start.toTimeString().slice(0, 5) + "\n" + new Date(row.end).toTimeString().slice(0, 5);
-    when.style.whiteSpace = "pre";
-
-    const body = document.createElement("div");
-    body.className = "body";
-    const title = document.createElement("div");
-    title.className = "title";
-    title.textContent = row.title;
-    body.appendChild(title);
-    if (row.location) {
-      const meta = document.createElement("div");
-      meta.className = "meta";
-      meta.textContent = row.location;
-      body.appendChild(meta);
-    }
-
-    item.append(when, body, delButton(() => {
-      // 行事曆的刪除是真的刪掉，救不回來，所以問清楚一點
-      if (confirm(`從行事曆刪掉「${row.title}」？\n這個救不回來。`)) {
-        act(item, async () => renderEvents(await api("/events/" + encodeURIComponent(row.id), { method: "DELETE" })));
-      }
-    }));
-    wrap.appendChild(item);
+    for (const row of todays) wrap.appendChild(eventRow(row));
   }
 }
 
@@ -525,7 +674,22 @@ function renderExpenses(data) {
     meta.textContent = money(row.amount) + " · " + row.category;
     body.append(title, meta);
 
-    item.append(when, body, delButton(() => {
+    item.append(when, body, smallButton("改", "edit", () => inlineEdit(item, [
+      { key: "item", type: "text", value: row.item, half: true, placeholder: "項目" },
+      { key: "amount", type: "number", value: row.amount, half: true, placeholder: "金額" },
+      { key: "category", type: "select", value: row.category, half: true, options: names },
+      { key: "date", type: "date", value: row.date, half: true },
+    ], async (values) => renderExpenses(await api("/expenses/" + row.page_id, {
+      method: "PATCH",
+      body: JSON.stringify({
+        item: values.item.trim(),
+        amount: Number(values.amount),
+        category: values.category,
+        date: values.date,
+      }),
+    })))));
+
+    item.appendChild(delButton(() => {
       if (confirm(`刪除「${row.item}」${money(row.amount)}？`)) {
         act(item, async () => renderExpenses(
           await api(`/expenses/${row.page_id}?month=${expenseMonth}`, { method: "DELETE" })));
@@ -638,7 +802,33 @@ function sopCard(row) {
   name.textContent = row.name;
   const count = document.createElement("div");
   count.className = "count";
-  head.append(name, count);
+
+  // 改流程要先有步驟才改得動，所以按下去先抓一次再開表單
+  const edit = smallButton("改", "edit", async (event) => {
+    event.stopPropagation();
+    edit.disabled = true;
+    try {
+      const data = await api("/sops/" + row.page_id);
+      inlineEdit(card, [
+        { key: "name", type: "text", value: row.name, half: true, placeholder: "流程名稱" },
+        { key: "category", type: "text", value: row.category, half: true,
+          placeholder: "分類", list: "sop-cats" },
+        { key: "steps", type: "textarea", rows: 6, value: data.steps.join("\n") },
+      ], async (values) => renderSops(await api("/sops/" + row.page_id, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: values.name.trim(),
+          category: values.category.trim(),
+          steps: values.steps,
+        }),
+      })));
+    } catch (error) {
+      alert("讀取失敗：" + error.message);
+      edit.disabled = false;
+    }
+  });
+
+  head.append(name, count, edit);
   card.appendChild(head);
 
   // 看「全部」時要看得出各自屬於哪一類，已經篩過了就不用重複講
@@ -740,16 +930,15 @@ async function loadShortcuts() {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = entry.item;
-    const hint = document.createElement("span");
-    hint.textContent = money(entry.amount);
-    button.appendChild(hint);
+    // 只帶品項與分類，金額留空讓使用者自己填——同一個項目每次花的錢
+    // 本來就不一樣，先填一個數字反而要多刪一次。
     button.onclick = () => {
       $("expense-item").value = entry.item;
-      $("expense-amount").value = entry.amount;
       if ([...$("expense-cat").options].some((option) => option.value === entry.category)) {
         $("expense-cat").value = entry.category;
       }
-      $("expense-item").dispatchEvent(new Event("input"));  // 讓送出鈕解鎖
+      $("expense-item").dispatchEvent(new Event("input"));  // 重算送出鈕的狀態
+      $("expense-amount").focus();
     };
     chips.appendChild(button);
   }

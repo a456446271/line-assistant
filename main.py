@@ -172,6 +172,23 @@ def api_complete_todo(page_id: str, x_line_id_token: str = Header("")) -> list[d
     return _todo_json()
 
 
+@app.patch("/api/todos/{page_id}")
+def api_update_todo(
+    page_id: str, payload: dict = Body(...), x_line_id_token: str = Header("")
+) -> list[dict]:
+    _liff_user(x_line_id_token)
+    title = payload.get("title")
+    due = payload.get("due")
+    todo_api.update_todo(
+        page_id,
+        title=str(title).strip() if title is not None else None,
+        due=date.fromisoformat(due) if due else None,
+        category=payload.get("category"),
+        clear_due="due" in payload and not due,
+    )
+    return _todo_json()
+
+
 @app.delete("/api/todos/{page_id}")
 def api_delete_todo(page_id: str, x_line_id_token: str = Header("")) -> list[dict]:
     _liff_user(x_line_id_token)
@@ -230,6 +247,32 @@ def api_add_event(payload: dict = Body(...), x_line_id_token: str = Header("")) 
     calendar_api.create_event(
         title,
         begin.isoformat(),
+        (begin + timedelta(minutes=minutes)).isoformat(),
+        str(payload.get("location") or ""),
+    )
+    return _events_json()
+
+
+@app.patch("/api/events/{event_id}")
+def api_update_event(
+    event_id: str, payload: dict = Body(...), x_line_id_token: str = Header("")
+) -> list[dict]:
+    _liff_user(x_line_id_token)
+    title = str(payload.get("title") or "").strip()
+    day = str(payload.get("date") or "").strip()
+    if not title or not day:
+        raise HTTPException(status_code=400, detail="標題和日期都要填")
+
+    clock = str(payload.get("time") or "").strip()
+    if not clock:
+        calendar_api.update_event(event_id, title, day, day,
+                                  str(payload.get("location") or ""), all_day=True)
+        return _events_json()
+
+    begin = datetime.fromisoformat(f"{day}T{clock}").replace(tzinfo=config.TZ)
+    minutes = int(payload.get("minutes") or 60)
+    calendar_api.update_event(
+        event_id, title, begin.isoformat(),
         (begin + timedelta(minutes=minutes)).isoformat(),
         str(payload.get("location") or ""),
     )
@@ -321,6 +364,28 @@ def api_add_expense(payload: dict = Body(...), x_line_id_token: str = Header("")
     return _expenses_json(spent_on[:7])
 
 
+@app.patch("/api/expenses/{page_id}")
+def api_update_expense(
+    page_id: str, payload: dict = Body(...), x_line_id_token: str = Header("")
+) -> dict:
+    _liff_user(x_line_id_token)
+    amount = payload.get("amount")
+    try:
+        amount = float(amount) if amount is not None else None
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="金額怪怪的")
+
+    spent_on = str(payload.get("date") or "")
+    expense_api.update_expense(
+        page_id,
+        item=str(payload["item"]).strip() if "item" in payload else None,
+        amount=amount,
+        category=payload.get("category"),
+        spent_on=spent_on or None,
+    )
+    return _expenses_json(spent_on[:7] if spent_on else str(payload.get("month") or ""))
+
+
 @app.delete("/api/expenses/{page_id}")
 def api_delete_expense(
     page_id: str, month: str = "", x_line_id_token: str = Header("")
@@ -358,6 +423,30 @@ def api_add_sop(payload: dict = Body(...), x_line_id_token: str = Header("")) ->
         raise HTTPException(status_code=400, detail="名稱和步驟都要填")
 
     sop_api.add_sop(name, lines, str(payload.get("category") or ""))
+    return api_list_sops(x_line_id_token)
+
+
+@app.patch("/api/sops/{page_id}")
+def api_update_sop(
+    page_id: str, payload: dict = Body(...), x_line_id_token: str = Header("")
+) -> list[dict]:
+    _liff_user(x_line_id_token)
+    name = payload.get("name")
+    steps_text = payload.get("steps")
+    lines = (
+        [line for line in str(steps_text).splitlines() if line.strip()]
+        if steps_text is not None
+        else None
+    )
+    if lines is not None and not lines:
+        raise HTTPException(status_code=400, detail="步驟不能全空")
+
+    sop_api.update_sop(
+        page_id,
+        name=str(name).strip() if name is not None else None,
+        category=payload.get("category"),
+        lines=lines,
+    )
     return api_list_sops(x_line_id_token)
 
 

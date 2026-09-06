@@ -70,3 +70,9 @@ def title_of(page: dict) -> str:
         if value.get("type") == "title":
             return plain(value["title"])
     return ""
+
+
+def delete(path: str) -> dict:
+    response = httpx.delete(f"{API}{path}", headers=headers(), timeout=_TIMEOUT)
+    response.raise_for_status()
+    return response.json()
