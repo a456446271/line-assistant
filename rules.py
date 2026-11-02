@@ -18,6 +18,7 @@ from datetime import date, datetime, time, timedelta
 import calendar_api
 import config
 import expense_api
+import line_api
 import sop_api
 import todo_api
 import zh_datetime
@@ -388,7 +389,12 @@ def _match_budget(text: str) -> AgentResult | None:
         f"（剩 {_money(budget - totals.get(name, 0))}）"
         for name, budget in config.BUDGETS.items()
     ]
-    return AgentResult(text="本月預算狀況：\n" + "\n".join(lines))
+    text = "本月預算狀況：\n" + "\n".join(lines)
+    if not config.BUDGETS:
+        return AgentResult(text=text)
+    return AgentResult(
+        text=text, card=line_api.budget_card(today.month, totals, config.BUDGETS, text)
+    )
 
 
 def _match_expense_query(text: str) -> AgentResult | None:
@@ -429,7 +435,8 @@ def _match_expense_query(text: str) -> AgentResult | None:
         f"・{name} {_money(amount)}"
         for name, amount in sorted(totals.items(), key=lambda kv: -kv[1])
     )
-    return AgentResult(text=f"{label}總共花了 {_money(total)}\n{detail}")
+    text = f"{label}總共花了 {_money(total)}\n{detail}"
+    return AgentResult(text=text, card=line_api.spending_card(label, totals, len(rows), text))
 
 
 def _match_free_slots(text: str) -> AgentResult | None:
@@ -477,7 +484,9 @@ def _match_calendar(text: str) -> AgentResult | None:
     if not events:
         return AgentResult(text=f"{label}沒有安排任何行程。")
 
-    return AgentResult(text=f"{label}的行程：\n{_fmt_events(events, start_day != end_day)}")
+    multi_day = start_day != end_day
+    text = f"{label}的行程：\n{_fmt_events(events, multi_day)}"
+    return AgentResult(text=text, card=line_api.schedule_card(label, events, multi_day, text))
 
 
 def _match_create_event(text: str) -> AgentResult | None:

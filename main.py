@@ -518,7 +518,7 @@ def _handle_text(user_id: str, reply_token: str, user_text: str) -> None:
 
     if result.created_expense:
         # 記帳的回覆本身就帶撤銷按鈕，不用再多送一則純文字。
-        messages = [line_api.expense_card(result.text, result.created_expense["page_id"])]
+        messages = [line_api.expense_card(result.created_expense)]
     elif result.todo_list:
         # 用卡片而不是純文字，這樣每一列都能直接按完成或刪除，不用再打字回覆。
         messages = [_todo_card(result.todo_list)]
@@ -537,6 +537,8 @@ def _handle_text(user_id: str, reply_token: str, user_text: str) -> None:
         ]
         if result.text:
             messages.insert(0, line_api.text(result.text))
+    elif result.card:
+        messages = [result.card]
     else:
         messages = [line_api.text(result.text)]
 
@@ -610,23 +612,19 @@ def _push_all(messages: list[dict]) -> int:
     return len(config.ALLOWED_USER_IDS)
 
 
-def _todo_digest(today) -> str:
-    """今天（含逾期）該處理的待辦。沒有就回空字串。
+def _due_todos(today) -> list[dict]:
+    """今天（含逾期）該處理的待辦。
 
     待辦本來要自己想到才會去問，放進早報才真的會被看到。
     只列到期的，沒期限的不推——那些推了只會變成每天都在的雜訊。
     """
     if not todo_api.enabled():
-        return ""
+        return []
     try:
-        rows = todo_api.due_by(today)
+        return todo_api.due_by(today)
     except Exception:
         logger.exception("早報取待辦失敗")
-        return ""
-    return "\n".join(
-        f"・{row['title']}" + (f"（逾期 {(today - row['due']).days} 天）" if row["due"] < today else "")
-        for row in rows
-    )
+        return []
 
 
 def _job_daily() -> dict:
@@ -634,23 +632,25 @@ def _job_daily() -> dict:
     start = datetime.combine(today, time.min, config.TZ)
     events = calendar_api.list_events(start, start + timedelta(days=1))
     listing = "\n".join(f"・{agent.fmt_event(event)}" for event in events)
-    todos = _todo_digest(today)
+    due = _due_todos(today)
+    todos = "\n".join(
+        f"・{row['title']}" + (f"（逾期 {(today - row['due']).days} 天）" if row["due"] < today else "")
+        for row in due
+    )
 
+    # 卡片底下本來就會逐條列出行程與待辦，Claude 只要寫重點，不必重抄一次
+    summary = ""
     if config.LLM_ENABLED:
-        body = agent.summarize(
-            "這是使用者今天的行程與待辦，請寫一段簡短的早安摘要（三到五行，口語一點，"
-            "點出時間壓力或空檔，逾期的待辦要特別提）：\n"
+        summary = agent.summarize(
+            "這是使用者今天的行程與待辦，請寫一段簡短的早安摘要（兩到三行，口語一點，"
+            "點出時間壓力或空檔，逾期的待辦要特別提；行程清單會另外列出，不用逐條重複）：\n"
             f"行程：\n{listing or '（沒有行程）'}\n"
             f"今天到期的待辦：\n{todos or '（沒有）'}"
         )
-    else:
-        # 沒啟用 Claude 就直接排版，早報本來也不一定要 AI 潤稿
-        parts = [f"今天有 {len(events)} 個行程：\n{listing}" if events else "今天沒有安排的行程。"]
-        if todos:
-            parts.append(f"該處理的待辦：\n{todos}")
-        body = "\n\n".join(parts)
 
-    return {"job": "daily", "pushed_to": _push_all([line_api.text(f"早安！\n\n{body}")])}
+    alt = f"早安！今天有 {len(events)} 個行程" + (f"、{len(due)} 件待辦" if due else "")
+    card = line_api.daily_brief_card(today, events, due, summary, alt)
+    return {"job": "daily", "pushed_to": _push_all([card])}
 
 
 def _job_monthly() -> dict:
