@@ -39,3 +39,5 @@
 - **`calendar_api.update_event` 在整天與有時間之間切換時，要明確送 `None` 清掉另一種格式**。Google 的 start/end 同時有 `date` 和 `dateTime` 會回 400，而舊的那個欄位不會自己消失。
 - **`sop_api.update_sop` 換步驟是全刪重加**。Notion 沒有「一次替換所有子區塊」的 API，逐塊比對差異不值得，步驟通常十行以內。
 - **LIFF 的就地編輯共用 `inlineEdit()`**，四種資料只有欄位規格不同。新增可編輯的東西時寫一份 spec 就好，不要各自刻一套表單。
+- **LIFF 的顏色一律用 `:root` 的變數**（`--card`、`--field`、`--ink`…），深色模式只靠 `prefers-color-scheme` 換掉那組變數。在 CSS 或 JS 裡寫死 `#fff` 之類的顏色，深色模式下就會冒出一塊白底。
+- **`inlineEdit()` 是加上 `editing` class，不是取代**，取消時還原原本的 class。行程的 `ev`、流程的 `card` 都靠 class 上樣式，被洗掉的話編輯中和取消後都會跑版。
