@@ -41,7 +41,7 @@ _ERROR_REPLY = "抱歉，剛剛出了點狀況，再說一次好嗎？"
 # 純規則模式（沒設 ANTHROPIC_API_KEY）下，規則接不住時的回覆
 _NO_RULE_REPLY = (
     "這句我看不懂。可以試試這些講法：\n"
-    "・記帳：午餐 120\n"
+    "・記帳：午餐 120（只打 120 也行，會跳按鈕讓你選）\n"
     "・指定分類：娛樂 PS5 3000\n"
     "・查行程：今天有什麼安排\n"
     "・加行程：明天下午三點開會\n"
@@ -542,6 +542,9 @@ def _handle_text(user_id: str, reply_token: str, user_text: str) -> None:
     else:
         messages = [line_api.text(result.text)]
 
+    if result.quick_replies:
+        messages[-1]["quickReply"] = line_api.quick_reply(result.quick_replies)
+
     try:
         line_api.reply(reply_token, messages)
     except Exception:
@@ -576,6 +579,17 @@ def _handle_postback(user_id: str, reply_token: str, data: str) -> None:
             expense_api.archive_expense(params.get("page_id", ""))
             message = "已撤銷這筆記帳。"
 
+        elif action == "quick_expense":
+            # 只打金額後點的按鈕。卡片本身就說明了記了什麼，不用再多一句文字。
+            created = expense_api.add_expense(
+                float(params.get("amount", "0")),
+                params.get("category", ""),
+                params.get("item", "") or "其他",
+                datetime.now(config.TZ).date().isoformat(),
+            )
+            message = ""
+            messages = [line_api.expense_card(created)]
+
         elif action in ("done_todo", "delete_todo"):
             page_id = params.get("page_id", "")
             if action == "done_todo":
@@ -598,7 +612,8 @@ def _handle_postback(user_id: str, reply_token: str, data: str) -> None:
         messages = []
 
     try:
-        line_api.reply(reply_token, [line_api.text(message), *messages])
+        head = [line_api.text(message)] if message else []
+        line_api.reply(reply_token, [*head, *messages])
     except Exception:
         logger.exception("回覆失敗")
 

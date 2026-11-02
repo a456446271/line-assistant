@@ -489,6 +489,27 @@ def daily_brief_card(today, events: list[dict], todos: list[dict], summary: str,
     return _flex(alt, _bubble(body, _link_footer("打開助理", uri) if uri else None))
 
 
+def quick_reply(items: list[dict]) -> dict:
+    """訊息底下那排可以點的按鈕。點了就消失，所以不會被連按兩次。
+
+    items 每項：{"label", "data", "display"}。LINE 最多 13 顆，label 最多 20 字。
+    """
+    return {
+        "items": [
+            {
+                "type": "action",
+                "action": {
+                    "type": "postback",
+                    "label": item["label"][:20],
+                    "data": item["data"],
+                    "displayText": item["display"],
+                },
+            }
+            for item in items[:13]
+        ]
+    }
+
+
 def _icon_button(label: str, data: str, color: str) -> dict:
     """清單列右邊的小按鈕。用符號而不是文字，兩顆才排得下一列。"""
     return {

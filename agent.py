@@ -43,6 +43,8 @@ class AgentResult:
     todo_list: list[dict] | None = None
     # 規則層排好的 Flex 卡片。有值就用它回覆，text 只當通知預覽與終端機輸出
     card: dict | None = None
+    # 掛在回覆最後一則下面的快速回覆按鈕（line_api.quick_reply 的格式）
+    quick_replies: list[dict] | None = None
 
 
 def _now() -> datetime:
