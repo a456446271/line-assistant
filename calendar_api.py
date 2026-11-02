@@ -65,7 +65,7 @@ def list_events(start: datetime, end: datetime) -> list[dict]:
             timeMax=end.isoformat(),
             singleEvents=True,
             orderBy="startTime",
-            maxResults=100,
+            maxResults=250,
         )
         .execute()
     )

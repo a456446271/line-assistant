@@ -205,10 +205,20 @@ def api_delete_todo(page_id: str, x_line_id_token: str = Header("")) -> list[dic
 _EVENT_DAYS = 21
 
 
-def _events_json() -> list[dict]:
-    now = datetime.now(config.TZ)
-    start = datetime.combine(now.date(), time.min, config.TZ)
-    events = calendar_api.list_events(start, start + timedelta(days=_EVENT_DAYS))
+def _events_json(month: str = "") -> list[dict]:
+    """month 給 YYYY-MM 就回那整個月（月曆用），沒給就回今天起 _EVENT_DAYS 天。"""
+    if month:
+        try:
+            first = date.fromisoformat(month + "-01")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="month 要是 YYYY-MM")
+        start = datetime.combine(first, time.min, config.TZ)
+        following = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
+        end = datetime.combine(following, time.min, config.TZ)
+    else:
+        start = datetime.combine(datetime.now(config.TZ).date(), time.min, config.TZ)
+        end = start + timedelta(days=_EVENT_DAYS)
+    events = calendar_api.list_events(start, end)
     return [
         {
             "id": event["id"],
@@ -223,9 +233,9 @@ def _events_json() -> list[dict]:
 
 
 @app.get("/api/events")
-def api_list_events(x_line_id_token: str = Header("")) -> list[dict]:
+def api_list_events(month: str = "", x_line_id_token: str = Header("")) -> list[dict]:
     _liff_user(x_line_id_token)
-    return _events_json()
+    return _events_json(month)
 
 
 @app.post("/api/events")

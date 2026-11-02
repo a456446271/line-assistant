@@ -168,6 +168,65 @@
   .dayhead.empty { margin: 6px 2px; font-weight: 400; color: var(--faint); }
   .dayhead .rest { color: var(--faint); font-weight: 400; }
 
+  /* 月曆 */
+  .cal { padding: 12px 8px 6px; }
+  .cal-head { display: flex; align-items: center; gap: 6px; padding: 0 6px 8px; }
+  .cal-head b { flex: 1; font-size: 17px; }
+  .cal-nav {
+    border: 0; border-radius: 999px; background: var(--field); color: var(--ink);
+    min-width: 34px; height: 32px; padding: 0 11px; font-size: 14px;
+  }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; }
+  .dow { font-size: 11px; color: var(--dim); padding: 2px 0 4px; }
+  .cal-day {
+    border: 0; background: none; color: var(--ink); padding: 3px 0 5px;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+  }
+  .cal-day .num {
+    width: 32px; height: 32px; line-height: 32px; border-radius: 50%;
+    font-size: 15px; font-variant-numeric: tabular-nums;
+  }
+  .cal-day.wkend .num { color: var(--dim); }
+  .cal-day.past { opacity: .4; }
+  .cal-day.today .num { color: var(--green-ink); font-weight: 700; box-shadow: inset 0 0 0 1.5px var(--green); }
+  .cal-day.sel { opacity: 1; }
+  .cal-day.sel .num { background: var(--green); color: #fff; font-weight: 700; box-shadow: none; }
+  .cal-day .dots { display: flex; gap: 3px; height: 5px; }
+  .cal-day .dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
+  .cal-day .dots i.allday { background: var(--amber); }
+
+  /* 當天的時間軸：行程畫成色塊，高度對應長度 */
+  .tl-wrap { background: var(--card); border-radius: 16px; box-shadow: var(--shadow); padding: 14px 12px 14px 56px; }
+  .tl { position: relative; }
+  .tl .hr { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line); }
+  .tl .hr span {
+    position: absolute; left: -48px; top: -8px; width: 40px; text-align: right;
+    font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums;
+  }
+  .blk {
+    position: absolute; border: 0; text-align: left; overflow: hidden;
+    border-radius: 10px; padding: 5px 8px; font-size: 13px; line-height: 1.3;
+    background: var(--green-soft); border-left: 4px solid var(--green); color: var(--ink);
+  }
+  .blk b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .blk small { display: block; font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .blk.on { box-shadow: 0 0 0 2px var(--green); }
+  .past-blk { opacity: .55; }
+  .nowline { position: absolute; left: -6px; right: 0; border-top: 2px solid var(--red); z-index: 2; pointer-events: none; }
+  .nowline::before {
+    content: ""; position: absolute; left: -4px; top: -5px;
+    width: 8px; height: 8px; border-radius: 50%; background: var(--red);
+  }
+  .allday-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .allday-chip {
+    border: 0; border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 600;
+    background: var(--amber-soft); color: var(--amber);
+  }
+  .free-day { text-align: center; padding: 28px 16px; color: var(--dim); font-size: 14px; }
+  .free-day b { display: block; color: var(--green-ink); font-size: 17px; margin-bottom: 4px; }
+  .hint { font-size: 12px; color: var(--faint); text-align: center; margin: 8px 0 2px; }
+  #find-free { margin-top: 12px; }
+
   /* 清單分段：待辦依期限、記帳依日期 */
   li.section {
     display: flex; justify-content: space-between; align-items: baseline;
@@ -282,6 +341,8 @@
     <input class="half" id="event-loc" type="text" placeholder="地點（可留空）" autocomplete="off">
     </div>
   </form>
+  <div class="card cal" id="cal"></div>
+  <div id="day-view"></div>
   <details class="card" id="find-free">
     <summary>找空檔</summary>
     <form id="form-free">
@@ -300,7 +361,6 @@
     </form>
     <div id="list-free"></div>
   </details>
-  <div id="list-event"></div>
   <div class="note" id="note-event"><b>載入中…</b></div>
 </section>
 
@@ -652,13 +712,6 @@ $("search-sop").oninput = () => renderSops(allSops);
 
 // --- 行程 ---
 
-const EVENT_DAYS = 21;
-
-function isoDay(when) {
-  return new Date(when.getTime() - when.getTimezoneOffset() * 60000)
-    .toISOString().slice(0, 10);
-}
-
 function eventRow(row) {
   const start = new Date(row.start);
   const item = document.createElement("li");
@@ -715,40 +768,265 @@ function eventRow(row) {
   return item;
 }
 
-function renderEvents(rows) {
-  const wrap = $("list-event");
-  wrap.innerHTML = "";
-  hideNote("event");
+// 月曆：上面一整個月，每天底下的點代表有幾個行程；點某一天，下面畫出那天的時間軸。
+// 日期一律用字串（YYYY-MM-DD）比對，避免手機時區跟行事曆不同時差一天。
 
-  // 每一天都列出來，沒事的日子只留一行日期。
-  // 只列有事的話看不出哪幾天是空的，而「哪天有空」正是最常想知道的事。
-  const byDay = {};
-  for (const row of rows) (byDay[row.start.slice(0, 10)] ||= []).push(row);
+let viewMonth = null;   // 月曆顯示的月份（該月 1 號）
+let selectedDay = "";   // 下面時間軸顯示的那一天
+let monthEvents = [];
 
-  for (let offset = 0; offset < EVENT_DAYS; offset++) {
-    const when = new Date(today0().getTime() + offset * 86400000);
-    const key = isoDay(when);
-    const todays = byDay[key] || [];
+const pad2 = (n) => String(n).padStart(2, "0");
+const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const monthKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 
-    const head = document.createElement("div");
-    head.className = "dayhead" + (todays.length ? "" : " empty") + (offset === 0 ? " now" : "");
-    head.textContent = `${when.getMonth() + 1}/${when.getDate()}（${WEEK[when.getDay()]}）`;
-    if (offset <= 1) {
-      const pill = document.createElement("span");
-      pill.className = offset === 0 ? "pill" : "";
-      pill.textContent = offset === 0 ? "今天" : "明天";
-      head.appendChild(pill);
-    }
-    if (!todays.length) {
-      const rest = document.createElement("span");
-      rest.className = "rest";
-      rest.textContent = "　—";
-      head.appendChild(rest);
-    }
-    wrap.appendChild(head);
-
-    for (const row of todays) wrap.appendChild(eventRow(row));
+async function loadMonth() {
+  if (!viewMonth) {
+    const now = today0();
+    viewMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    selectedDay = ymd(now);
   }
+  monthEvents = await api("/events?month=" + monthKey(viewMonth));
+  hideNote("event");
+  drawCalendar();
+  drawDay();
+}
+
+// 新增、修改、刪除的回傳是「今天起三週」，跟月曆顯示的月份對不上，所以一律重抓這個月
+async function renderEvents() { await loadMonth(); }
+
+// 整天行程可能跨好幾天，結束日不含（Google 的慣例）
+function daysOf(row) {
+  const first = row.start.slice(0, 10);
+  if (!row.all_day) return [first];
+  const days = [];
+  const last = row.end.slice(0, 10);
+  for (const d = new Date(first + "T00:00:00"); ymd(d) < last; d.setDate(d.getDate() + 1)) {
+    days.push(ymd(d));
+  }
+  return days.length ? days : [first];
+}
+
+function eventsByDay() {
+  const map = {};
+  for (const row of monthEvents) for (const day of daysOf(row)) (map[day] ||= []).push(row);
+  return map;
+}
+
+function goMonth(delta) {
+  const now = today0();
+  viewMonth = delta === 0
+    ? new Date(now.getFullYear(), now.getMonth(), 1)
+    : new Date(viewMonth.getFullYear(), viewMonth.getMonth() + delta, 1);
+  // 回到本月就選今天，其他月份選 1 號
+  selectedDay = monthKey(viewMonth) === monthKey(now) ? ymd(now) : ymd(viewMonth);
+  loadMonth().catch((error) => note("event", "載入失敗", error.message));
+}
+
+function selectDay(key) {
+  selectedDay = key;
+  // 表單還沒打開的話，順手把日期換成點的那天，接著新增就不用再選一次
+  if (!$("form-event").classList.contains("open")) $("event-date").value = key;
+  drawCalendar();
+  drawDay();
+}
+
+function drawCalendar() {
+  const box = $("cal");
+  box.innerHTML = "";
+
+  const head = document.createElement("div");
+  head.className = "cal-head";
+  const title = document.createElement("b");
+  title.textContent = `${viewMonth.getFullYear()} 年 ${viewMonth.getMonth() + 1} 月`;
+  head.append(
+    title,
+    smallButton("今天", "cal-nav", () => goMonth(0)),
+    smallButton("‹", "cal-nav", () => goMonth(-1)),
+    smallButton("›", "cal-nav", () => goMonth(1)));
+  box.appendChild(head);
+
+  const grid = document.createElement("div");
+  grid.className = "cal-grid";
+  for (const name of "日一二三四五六") {
+    const cell = document.createElement("div");
+    cell.className = "dow";
+    cell.textContent = name;
+    grid.appendChild(cell);
+  }
+
+  const map = eventsByDay();
+  const todayKey = ymd(today0());
+  const lead = viewMonth.getDay();
+  const count = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 0).getDate();
+  for (let i = 0; i < lead; i++) grid.appendChild(document.createElement("div"));
+
+  for (let n = 1; n <= count; n++) {
+    const key = `${monthKey(viewMonth)}-${pad2(n)}`;
+    const cell = document.createElement("button");
+    cell.type = "button";
+    cell.className = "cal-day";
+    const weekday = (lead + n - 1) % 7;
+    if (weekday === 0 || weekday === 6) cell.classList.add("wkend");
+    if (key < todayKey) cell.classList.add("past");
+    if (key === todayKey) cell.classList.add("today");
+    if (key === selectedDay) cell.classList.add("sel");
+
+    const num = document.createElement("span");
+    num.className = "num";
+    num.textContent = n;
+    const dots = document.createElement("span");
+    dots.className = "dots";
+    for (const row of (map[key] || []).slice(0, 4)) {
+      const dot = document.createElement("i");
+      if (row.all_day) dot.className = "allday";
+      dots.appendChild(dot);
+    }
+    cell.append(num, dots);
+    cell.onclick = () => selectDay(key);
+    grid.appendChild(cell);
+  }
+  box.appendChild(grid);
+}
+
+const HOUR_PX = 46;
+const minutesOf = (iso) => Number(iso.slice(11, 13)) * 60 + Number(iso.slice(14, 16));
+
+function drawDay() {
+  const wrap = $("day-view");
+  wrap.innerHTML = "";
+
+  const day = new Date(selectedDay + "T00:00:00");
+  const todayKey = ymd(today0());
+  const offset = Math.round((day - today0()) / 86400000);
+  const head = document.createElement("div");
+  head.className = "dayhead" + (offset === 0 ? " now" : "");
+  head.textContent = `${day.getMonth() + 1}/${day.getDate()}（${WEEK[day.getDay()]}）`;
+  if (offset === 0 || offset === 1) {
+    const pill = document.createElement("span");
+    pill.className = offset === 0 ? "pill" : "";
+    pill.textContent = offset === 0 ? "今天" : "明天";
+    head.appendChild(pill);
+  }
+  wrap.appendChild(head);
+
+  const rows = eventsByDay()[selectedDay] || [];
+  const detail = document.createElement("ul");
+  const show = (row, button) => {
+    wrap.querySelectorAll(".on").forEach((el) => el.classList.remove("on"));
+    if (button) button.classList.add("on");
+    detail.innerHTML = "";
+    detail.appendChild(eventRow(row));
+  };
+
+  const card = document.createElement("div");
+  card.className = "tl-wrap";
+  wrap.appendChild(card);
+
+  if (!rows.length) {
+    card.style.padding = "0";
+    card.innerHTML = '<div class="free-day"><b>這天沒有行程</b>整天都空著</div>';
+    return;
+  }
+
+  const allDay = rows.filter((row) => row.all_day);
+  if (allDay.length) {
+    const strip = document.createElement("div");
+    strip.className = "allday-strip";
+    for (const row of allDay) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "allday-chip";
+      chip.textContent = "整天 · " + row.title;
+      chip.onclick = () => show(row, chip);
+      strip.appendChild(chip);
+    }
+    card.appendChild(strip);
+  }
+
+  const timed = rows.filter((row) => !row.all_day);
+  if (!timed.length) {
+    card.style.paddingLeft = "12px";
+  } else {
+    // 跨到隔天的行程，在這一天畫到午夜為止
+    const startOf = (row) => minutesOf(row.start);
+    const endOf = (row) => row.end.slice(0, 10) > selectedDay
+      ? 24 * 60 : Math.max(minutesOf(row.end), startOf(row) + 15);
+    const from = Math.floor(Math.min(9 * 60, ...timed.map(startOf)) / 60) * 60;
+    const to = Math.min(24 * 60, Math.ceil(Math.max(21 * 60, ...timed.map(endOf)) / 60) * 60);
+
+    const line = document.createElement("div");
+    line.className = "tl";
+    line.style.height = ((to - from) / 60) * HOUR_PX + "px";
+    for (let m = from; m <= to; m += 60) {
+      const hr = document.createElement("div");
+      hr.className = "hr";
+      hr.style.top = ((m - from) / 60) * HOUR_PX + "px";
+      const label = document.createElement("span");
+      label.textContent = `${pad2(m / 60 % 24)}:00`;
+      hr.appendChild(label);
+      line.appendChild(hr);
+    }
+
+    // 時間重疊的並排：同一群重疊的行程平分寬度
+    const sorted = [...timed].sort((a, b) => startOf(a) - startOf(b));
+    let group = [], columns = [], groupEnd = -1;
+    const flush = () => {
+      for (const entry of group) entry.width = columns.length;
+      group = []; columns = [];
+    };
+    const placed = [];
+    for (const row of sorted) {
+      if (startOf(row) >= groupEnd) flush();
+      let col = columns.findIndex((end) => end <= startOf(row));
+      if (col < 0) { col = columns.length; columns.push(0); }
+      columns[col] = endOf(row);
+      groupEnd = Math.max(groupEnd, endOf(row));
+      const entry = { row, col, width: 1 };
+      group.push(entry);
+      placed.push(entry);
+    }
+    flush();
+
+    const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+    for (const { row, col, width } of placed) {
+      const block = document.createElement("button");
+      block.type = "button";
+      block.className = "blk";
+      if (selectedDay < todayKey || (selectedDay === todayKey && endOf(row) <= nowMin)) {
+        block.classList.add("past-blk");
+      }
+      block.style.top = ((startOf(row) - from) / 60) * HOUR_PX + 1 + "px";
+      block.style.height = Math.max(24, ((endOf(row) - startOf(row)) / 60) * HOUR_PX - 2) + "px";
+      block.style.left = `calc(${(col / width) * 100}% + 2px)`;
+      block.style.width = `calc(${100 / width}% - 4px)`;
+
+      const name = document.createElement("b");
+      name.textContent = row.title;
+      const time = document.createElement("small");
+      time.textContent = `${row.start.slice(11, 16)}–${row.end.slice(11, 16)}`;
+      block.append(name, time);
+      if (row.location) {
+        const place = document.createElement("small");
+        place.textContent = row.location;
+        block.appendChild(place);
+      }
+      block.onclick = () => show(row, block);
+      line.appendChild(block);
+    }
+
+    if (selectedDay === todayKey && nowMin >= from && nowMin <= to) {
+      const now = document.createElement("div");
+      now.className = "nowline";
+      now.style.top = ((nowMin - from) / 60) * HOUR_PX + "px";
+      line.appendChild(now);
+    }
+    card.appendChild(line);
+  }
+
+  const hint = document.createElement("div");
+  hint.className = "hint";
+  hint.textContent = "點一下行程可以修改或刪除";
+  wrap.append(hint, detail);
 }
 
 // --- 記帳 ---
@@ -1177,7 +1455,7 @@ $("search-expense").onsearch = searchExpenses;
 
 const LOADERS = {
   todo: async () => renderTodos(await api("/todos")),
-  event: async () => renderEvents(await api("/events")),
+  event: loadMonth,
   expense: async () => {
     renderExpenses(await api("/expenses"));
     await loadShortcuts();
