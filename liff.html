@@ -34,24 +34,39 @@
   button { cursor: pointer; }
   button:active { transform: scale(.97); }
 
-  header {
-    position: sticky; top: 0; z-index: 3;
-    background: color-mix(in srgb, var(--bg) 82%, transparent);
-    -webkit-backdrop-filter: saturate(180%) blur(16px); backdrop-filter: saturate(180%) blur(16px);
-    padding: calc(12px + env(safe-area-inset-top)) 14px 10px;
-  }
-  .hello { font-size: 13px; color: var(--dim); margin: 0 2px 8px; }
-  .hello b { font-size: 20px; color: var(--ink); margin-right: 6px; letter-spacing: .5px; }
-  nav { display: flex; gap: 4px; padding: 4px; background: var(--card); border-radius: 14px; box-shadow: var(--shadow); }
-  nav button {
-    flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
-    padding: 8px 0; border: 0; border-radius: 10px; background: none;
-    color: var(--dim); font-size: 14px; transition: background .15s, color .15s;
-  }
-  nav button svg { width: 17px; height: 17px; flex: 0 0 auto; pointer-events: none; }
-  nav button[aria-selected=true] { background: var(--green); color: #fff; font-weight: 600; }
+  header { padding: calc(16px + env(safe-area-inset-top)) 16px 6px; }
+  .hello { font-size: 13px; color: var(--dim); margin: 0 2px; }
+  .hello b { font-size: 24px; color: var(--ink); margin-right: 6px; letter-spacing: .5px; }
 
-  .pane { padding: 4px 14px 14px; }
+  /* 分頁放底部，大拇指按得到。內容要留出底部的空間，不然最後一列會被蓋住 */
+  body { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+  .tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+    display: flex; padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--card) 88%, transparent);
+    -webkit-backdrop-filter: saturate(180%) blur(18px); backdrop-filter: saturate(180%) blur(18px);
+    border-top: 1px solid var(--line);
+  }
+  .tabbar button {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 5px 0; border: 0; background: none; color: var(--dim); font-size: 11px;
+  }
+  .tabbar button svg { width: 24px; height: 24px; pointer-events: none; }
+  .tabbar button[aria-selected=true] { color: var(--green-ink); font-weight: 600; }
+
+  /* 新增表單平常只有一行，點進去才展開其他欄位，清單才不會被擠到下面 */
+  .composer { display: block; padding: 8px; }
+  .composer .line { display: flex; gap: 8px; align-items: center; }
+  .composer .line input { flex: 1; min-width: 0; }
+  .composer .line input.amount { flex: 0 0 92px; }
+  .composer .more { display: none; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .composer.open .more { display: flex; }
+  .composer button[type=submit] {
+    flex: 0 0 44px; width: 44px; height: 44px; padding: 0; border-radius: 50%;
+    font-size: 24px; line-height: 1; font-weight: 400;
+  }
+
+  .pane { padding: 10px 14px 14px; }
 
   .card { background: var(--card); border-radius: 16px; padding: 14px; box-shadow: var(--shadow); }
   .card + .card, .card + ul, ul + .card, .card + .chips, .card + .search { margin-top: 12px; }
@@ -153,6 +168,77 @@
   .dayhead.empty { margin: 6px 2px; font-weight: 400; color: var(--faint); }
   .dayhead .rest { color: var(--faint); font-weight: 400; }
 
+  /* 月曆 */
+  .cal { padding: 12px 8px 6px; }
+  .cal-head { display: flex; align-items: center; gap: 6px; padding: 0 6px 8px; }
+  .cal-head b { flex: 1; font-size: 17px; }
+  .cal-nav {
+    border: 0; border-radius: 999px; background: var(--field); color: var(--ink);
+    min-width: 34px; height: 32px; padding: 0 11px; font-size: 14px;
+  }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; }
+  .dow { font-size: 11px; color: var(--dim); padding: 2px 0 4px; }
+  .cal-day {
+    border: 0; background: none; color: var(--ink); padding: 3px 0 5px;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+  }
+  .cal-day .num {
+    width: 32px; height: 32px; line-height: 32px; border-radius: 50%;
+    font-size: 15px; font-variant-numeric: tabular-nums;
+  }
+  .cal-day.wkend .num { color: var(--dim); }
+  .cal-day.past { opacity: .4; }
+  .cal-day.today .num { color: var(--green-ink); font-weight: 700; box-shadow: inset 0 0 0 1.5px var(--green); }
+  .cal-day.sel { opacity: 1; }
+  .cal-day.sel .num { background: var(--green); color: #fff; font-weight: 700; box-shadow: none; }
+  .cal-day .dots { display: flex; gap: 3px; height: 5px; }
+  .cal-day .dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
+  .cal-day .dots i.allday { background: var(--amber); }
+
+  /* 當天的時間軸：行程畫成色塊，高度對應長度 */
+  .tl-wrap { background: var(--card); border-radius: 16px; box-shadow: var(--shadow); padding: 14px 12px 14px 56px; }
+  .tl { position: relative; }
+  .tl .hr { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line); }
+  .tl .hr span {
+    position: absolute; left: -48px; top: -8px; width: 40px; text-align: right;
+    font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums;
+  }
+  .blk {
+    position: absolute; border: 0; text-align: left; overflow: hidden;
+    border-radius: 10px; padding: 5px 8px; font-size: 13px; line-height: 1.3;
+    background: var(--green-soft); border-left: 4px solid var(--green); color: var(--ink);
+  }
+  .blk b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .blk small { display: block; font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .blk.on { box-shadow: 0 0 0 2px var(--green); }
+  .past-blk { opacity: .55; }
+  .nowline { position: absolute; left: -6px; right: 0; border-top: 2px solid var(--red); z-index: 2; pointer-events: none; }
+  .nowline::before {
+    content: ""; position: absolute; left: -4px; top: -5px;
+    width: 8px; height: 8px; border-radius: 50%; background: var(--red);
+  }
+  .allday-strip { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .allday-chip {
+    border: 0; border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 600;
+    background: var(--amber-soft); color: var(--amber);
+  }
+  .free-day { text-align: center; padding: 28px 16px; color: var(--dim); font-size: 14px; }
+  .free-day b { display: block; color: var(--green-ink); font-size: 17px; margin-bottom: 4px; }
+  .hint { font-size: 12px; color: var(--faint); text-align: center; margin: 8px 0 2px; }
+  #find-free { margin-top: 12px; }
+
+  /* 清單分段：待辦依期限、記帳依日期 */
+  li.section {
+    display: flex; justify-content: space-between; align-items: baseline;
+    background: none; box-shadow: none; padding: 14px 4px 2px; margin: 0;
+    font-size: 13px; font-weight: 600; color: var(--dim);
+  }
+  li.section:first-child { padding-top: 2px; }
+  li.section.over { color: var(--red); }
+  li.section.today { color: var(--amber); }
+  li.section span { font-weight: 400; font-variant-numeric: tabular-nums; }
+  .amt { flex: 0 0 auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+
   /* 就地編輯 */
   li.editing, .card.editing { display: block; padding: 14px; }
   .editing .row { display: flex; gap: 8px; margin-bottom: 8px; }
@@ -211,22 +297,20 @@
 
 <header>
   <div class="hello" id="hello"></div>
-  <nav id="tabs">
-    <button data-tab="todo" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>待辦</button>
-    <button data-tab="event" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>行程</button>
-    <button data-tab="expense" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18M16 15h2"/></svg>記帳</button>
-    <button data-tab="sop" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3.5 6 1 1 2-2M3.5 12l1 1 2-2M3.5 18l1 1 2-2"/></svg>流程</button>
-  </nav>
 </header>
 
 <section class="pane" id="pane-todo">
-  <form id="form-todo" class="card">
-    <input class="wide" id="todo-title" type="text" placeholder="要做什麼？" autocomplete="off">
-    <input class="half" id="todo-due" type="date" aria-label="期限">
-    <select class="half" id="todo-cat" aria-label="分類">
-      <option value="">未分類</option><option>工作</option><option>家裡</option><option>購物</option><option>其他</option>
-    </select>
-    <button type="submit" disabled>新增待辦</button>
+  <form id="form-todo" class="card composer">
+    <div class="line">
+      <input id="todo-title" type="text" placeholder="新增待辦…" autocomplete="off">
+      <button type="submit" disabled aria-label="新增待辦">＋</button>
+    </div>
+    <div class="more">
+      <input class="half" id="todo-due" type="date" aria-label="期限">
+      <select class="half" id="todo-cat" aria-label="分類">
+        <option value="">未分類</option><option>工作</option><option>家裡</option><option>購物</option><option>其他</option>
+      </select>
+    </div>
   </form>
   <div class="chips" id="chips-todo">
     <button type="button" data-done="0" aria-pressed="true">未完成</button>
@@ -238,8 +322,12 @@
 </section>
 
 <section class="pane" id="pane-event" hidden>
-  <form id="form-event" class="card">
-    <input class="wide" id="event-title" type="text" placeholder="行程名稱" autocomplete="off">
+  <form id="form-event" class="card composer">
+    <div class="line">
+      <input id="event-title" type="text" placeholder="新增行程…" autocomplete="off">
+      <button type="submit" disabled aria-label="加進行事曆">＋</button>
+    </div>
+    <div class="more">
     <input class="half" id="event-date" type="date" aria-label="日期">
     <input class="half" id="event-time" type="time" aria-label="時間">
     <select class="half" id="event-len" aria-label="長度">
@@ -251,8 +339,10 @@
       <option value="480">8 小時</option>
     </select>
     <input class="half" id="event-loc" type="text" placeholder="地點（可留空）" autocomplete="off">
-    <button type="submit" disabled>加進行事曆</button>
+    </div>
   </form>
+  <div class="card cal" id="cal"></div>
+  <div id="day-view"></div>
   <details class="card" id="find-free">
     <summary>找空檔</summary>
     <form id="form-free">
@@ -271,18 +361,21 @@
     </form>
     <div id="list-free"></div>
   </details>
-  <div id="list-event"></div>
   <div class="note" id="note-event"><b>載入中…</b></div>
 </section>
 
 <section class="pane" id="pane-expense" hidden>
   <div class="card hero" id="expense-summary"></div>
   <div class="chips" id="chips-expense"></div>
-  <form id="form-expense" class="card">
-    <input class="half" id="expense-item" type="text" placeholder="項目" autocomplete="off">
-    <input class="half" id="expense-amount" type="number" inputmode="numeric" placeholder="金額">
-    <select class="wide" id="expense-cat" aria-label="分類"></select>
-    <button type="submit" disabled>記一筆</button>
+  <form id="form-expense" class="card composer">
+    <div class="line">
+      <input id="expense-item" type="text" placeholder="記一筆…" autocomplete="off">
+      <input class="amount" id="expense-amount" type="number" inputmode="numeric" placeholder="金額">
+      <button type="submit" disabled aria-label="記一筆">＋</button>
+    </div>
+    <div class="more">
+      <select class="wide" id="expense-cat" aria-label="分類"></select>
+    </div>
   </form>
   <input class="search" id="search-expense" type="search"
          placeholder="搜尋過去一年的消費（按 Enter）" autocomplete="off" enterkeyhint="search">
@@ -308,6 +401,13 @@
   <div id="list-sop"></div>
   <div class="note" id="note-sop"><b>載入中…</b></div>
 </section>
+
+<nav id="tabs" class="tabbar">
+  <button data-tab="todo" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>待辦</button>
+  <button data-tab="event" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>行程</button>
+  <button data-tab="expense" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M3 10h18M16 15h2"/></svg>記帳</button>
+  <button data-tab="sop" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3.5 6 1 1 2-2M3.5 12l1 1 2-2M3.5 18l1 1 2-2"/></svg>流程</button>
+</nav>
 
 <script>
 const LIFF_ID = "__LIFF_ID__";
@@ -443,6 +543,18 @@ function inlineEdit(item, spec, save) {
   if (first) first.focus();
 }
 
+function sectionHead(label, right, className) {
+  const head = document.createElement("li");
+  head.className = "section " + (className || "");
+  head.textContent = label;
+  if (right) {
+    const side = document.createElement("span");
+    side.textContent = right;
+    head.appendChild(side);
+  }
+  return head;
+}
+
 // --- 待辦 ---
 
 function dueLabel(due) {
@@ -473,11 +585,31 @@ function renderTodos(list) {
     if (needle) return note("todo", "沒有符合的待辦", `「${needle}」在這個檢視裡找不到。`);
     return note("todo",
       showingDone ? "還沒有完成任何事" : "清單是空的",
-      showingDone ? "打勾之後會出現在這裡。" : "上面打一句話就能新增。");
+      showingDone ? "打勾之後會出現在這裡。" : "在上面那一行打字，按＋就能新增。");
   }
   hideNote("todo");
 
-  for (const row of rows) {
+  // 未完成的依期限分段：逾期、今天、之後、沒有期限。已完成的照完成順序就好
+  const groupOf = (row) => {
+    if (showingDone) return "";
+    if (!row.due) return "none";
+    const days = Math.round((new Date(row.due + "T00:00:00") - today0()) / 86400000);
+    return days < 0 ? "over" : days === 0 ? "today" : "later";
+  };
+  const ORDER = ["over", "today", "later", "none"];
+  const LABEL = { over: "逾期", today: "今天", later: "之後", none: "沒有期限" };
+  const sorted = showingDone ? rows : [...rows].sort((a, b) =>
+    ORDER.indexOf(groupOf(a)) - ORDER.indexOf(groupOf(b)) ||
+    String(a.due || "").localeCompare(String(b.due || "")));
+  let lastGroup = null;
+
+  for (const row of sorted) {
+    const group = groupOf(row);
+    if (group && group !== lastGroup) {
+      const count = sorted.filter((other) => groupOf(other) === group).length;
+      $("list-todo").appendChild(sectionHead(LABEL[group], String(count), group));
+      lastGroup = group;
+    }
     const item = document.createElement("li");
     const box = document.createElement("div");
     box.className = "box";
@@ -536,6 +668,8 @@ function renderTodos(list) {
       // 「排」把這件事丟到行程分頁的表單裡，順手訂個時間去做
       item.appendChild(smallButton("排", "plan", () => {
         $("event-title").value = row.title;
+        $("event-title").dispatchEvent(new Event("input"));  // 重算送出鈕的狀態
+        $("form-event").classList.add("open");
         show("event");
       }));
     }
@@ -577,13 +711,6 @@ $("search-todo").oninput = () => renderTodos(allTodos);
 $("search-sop").oninput = () => renderSops(allSops);
 
 // --- 行程 ---
-
-const EVENT_DAYS = 21;
-
-function isoDay(when) {
-  return new Date(when.getTime() - when.getTimezoneOffset() * 60000)
-    .toISOString().slice(0, 10);
-}
 
 function eventRow(row) {
   const start = new Date(row.start);
@@ -641,40 +768,265 @@ function eventRow(row) {
   return item;
 }
 
-function renderEvents(rows) {
-  const wrap = $("list-event");
-  wrap.innerHTML = "";
-  hideNote("event");
+// 月曆：上面一整個月，每天底下的點代表有幾個行程；點某一天，下面畫出那天的時間軸。
+// 日期一律用字串（YYYY-MM-DD）比對，避免手機時區跟行事曆不同時差一天。
 
-  // 每一天都列出來，沒事的日子只留一行日期。
-  // 只列有事的話看不出哪幾天是空的，而「哪天有空」正是最常想知道的事。
-  const byDay = {};
-  for (const row of rows) (byDay[row.start.slice(0, 10)] ||= []).push(row);
+let viewMonth = null;   // 月曆顯示的月份（該月 1 號）
+let selectedDay = "";   // 下面時間軸顯示的那一天
+let monthEvents = [];
 
-  for (let offset = 0; offset < EVENT_DAYS; offset++) {
-    const when = new Date(today0().getTime() + offset * 86400000);
-    const key = isoDay(when);
-    const todays = byDay[key] || [];
+const pad2 = (n) => String(n).padStart(2, "0");
+const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const monthKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 
-    const head = document.createElement("div");
-    head.className = "dayhead" + (todays.length ? "" : " empty") + (offset === 0 ? " now" : "");
-    head.textContent = `${when.getMonth() + 1}/${when.getDate()}（${WEEK[when.getDay()]}）`;
-    if (offset <= 1) {
-      const pill = document.createElement("span");
-      pill.className = offset === 0 ? "pill" : "";
-      pill.textContent = offset === 0 ? "今天" : "明天";
-      head.appendChild(pill);
-    }
-    if (!todays.length) {
-      const rest = document.createElement("span");
-      rest.className = "rest";
-      rest.textContent = "　—";
-      head.appendChild(rest);
-    }
-    wrap.appendChild(head);
-
-    for (const row of todays) wrap.appendChild(eventRow(row));
+async function loadMonth() {
+  if (!viewMonth) {
+    const now = today0();
+    viewMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    selectedDay = ymd(now);
   }
+  monthEvents = await api("/events?month=" + monthKey(viewMonth));
+  hideNote("event");
+  drawCalendar();
+  drawDay();
+}
+
+// 新增、修改、刪除的回傳是「今天起三週」，跟月曆顯示的月份對不上，所以一律重抓這個月
+async function renderEvents() { await loadMonth(); }
+
+// 整天行程可能跨好幾天，結束日不含（Google 的慣例）
+function daysOf(row) {
+  const first = row.start.slice(0, 10);
+  if (!row.all_day) return [first];
+  const days = [];
+  const last = row.end.slice(0, 10);
+  for (const d = new Date(first + "T00:00:00"); ymd(d) < last; d.setDate(d.getDate() + 1)) {
+    days.push(ymd(d));
+  }
+  return days.length ? days : [first];
+}
+
+function eventsByDay() {
+  const map = {};
+  for (const row of monthEvents) for (const day of daysOf(row)) (map[day] ||= []).push(row);
+  return map;
+}
+
+function goMonth(delta) {
+  const now = today0();
+  viewMonth = delta === 0
+    ? new Date(now.getFullYear(), now.getMonth(), 1)
+    : new Date(viewMonth.getFullYear(), viewMonth.getMonth() + delta, 1);
+  // 回到本月就選今天，其他月份選 1 號
+  selectedDay = monthKey(viewMonth) === monthKey(now) ? ymd(now) : ymd(viewMonth);
+  loadMonth().catch((error) => note("event", "載入失敗", error.message));
+}
+
+function selectDay(key) {
+  selectedDay = key;
+  // 表單還沒打開的話，順手把日期換成點的那天，接著新增就不用再選一次
+  if (!$("form-event").classList.contains("open")) $("event-date").value = key;
+  drawCalendar();
+  drawDay();
+}
+
+function drawCalendar() {
+  const box = $("cal");
+  box.innerHTML = "";
+
+  const head = document.createElement("div");
+  head.className = "cal-head";
+  const title = document.createElement("b");
+  title.textContent = `${viewMonth.getFullYear()} 年 ${viewMonth.getMonth() + 1} 月`;
+  head.append(
+    title,
+    smallButton("今天", "cal-nav", () => goMonth(0)),
+    smallButton("‹", "cal-nav", () => goMonth(-1)),
+    smallButton("›", "cal-nav", () => goMonth(1)));
+  box.appendChild(head);
+
+  const grid = document.createElement("div");
+  grid.className = "cal-grid";
+  for (const name of "日一二三四五六") {
+    const cell = document.createElement("div");
+    cell.className = "dow";
+    cell.textContent = name;
+    grid.appendChild(cell);
+  }
+
+  const map = eventsByDay();
+  const todayKey = ymd(today0());
+  const lead = viewMonth.getDay();
+  const count = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 0).getDate();
+  for (let i = 0; i < lead; i++) grid.appendChild(document.createElement("div"));
+
+  for (let n = 1; n <= count; n++) {
+    const key = `${monthKey(viewMonth)}-${pad2(n)}`;
+    const cell = document.createElement("button");
+    cell.type = "button";
+    cell.className = "cal-day";
+    const weekday = (lead + n - 1) % 7;
+    if (weekday === 0 || weekday === 6) cell.classList.add("wkend");
+    if (key < todayKey) cell.classList.add("past");
+    if (key === todayKey) cell.classList.add("today");
+    if (key === selectedDay) cell.classList.add("sel");
+
+    const num = document.createElement("span");
+    num.className = "num";
+    num.textContent = n;
+    const dots = document.createElement("span");
+    dots.className = "dots";
+    for (const row of (map[key] || []).slice(0, 4)) {
+      const dot = document.createElement("i");
+      if (row.all_day) dot.className = "allday";
+      dots.appendChild(dot);
+    }
+    cell.append(num, dots);
+    cell.onclick = () => selectDay(key);
+    grid.appendChild(cell);
+  }
+  box.appendChild(grid);
+}
+
+const HOUR_PX = 46;
+const minutesOf = (iso) => Number(iso.slice(11, 13)) * 60 + Number(iso.slice(14, 16));
+
+function drawDay() {
+  const wrap = $("day-view");
+  wrap.innerHTML = "";
+
+  const day = new Date(selectedDay + "T00:00:00");
+  const todayKey = ymd(today0());
+  const offset = Math.round((day - today0()) / 86400000);
+  const head = document.createElement("div");
+  head.className = "dayhead" + (offset === 0 ? " now" : "");
+  head.textContent = `${day.getMonth() + 1}/${day.getDate()}（${WEEK[day.getDay()]}）`;
+  if (offset === 0 || offset === 1) {
+    const pill = document.createElement("span");
+    pill.className = offset === 0 ? "pill" : "";
+    pill.textContent = offset === 0 ? "今天" : "明天";
+    head.appendChild(pill);
+  }
+  wrap.appendChild(head);
+
+  const rows = eventsByDay()[selectedDay] || [];
+  const detail = document.createElement("ul");
+  const show = (row, button) => {
+    wrap.querySelectorAll(".on").forEach((el) => el.classList.remove("on"));
+    if (button) button.classList.add("on");
+    detail.innerHTML = "";
+    detail.appendChild(eventRow(row));
+  };
+
+  const card = document.createElement("div");
+  card.className = "tl-wrap";
+  wrap.appendChild(card);
+
+  if (!rows.length) {
+    card.style.padding = "0";
+    card.innerHTML = '<div class="free-day"><b>這天沒有行程</b>整天都空著</div>';
+    return;
+  }
+
+  const allDay = rows.filter((row) => row.all_day);
+  if (allDay.length) {
+    const strip = document.createElement("div");
+    strip.className = "allday-strip";
+    for (const row of allDay) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "allday-chip";
+      chip.textContent = "整天 · " + row.title;
+      chip.onclick = () => show(row, chip);
+      strip.appendChild(chip);
+    }
+    card.appendChild(strip);
+  }
+
+  const timed = rows.filter((row) => !row.all_day);
+  if (!timed.length) {
+    card.style.paddingLeft = "12px";
+  } else {
+    // 跨到隔天的行程，在這一天畫到午夜為止
+    const startOf = (row) => minutesOf(row.start);
+    const endOf = (row) => row.end.slice(0, 10) > selectedDay
+      ? 24 * 60 : Math.max(minutesOf(row.end), startOf(row) + 15);
+    const from = Math.floor(Math.min(9 * 60, ...timed.map(startOf)) / 60) * 60;
+    const to = Math.min(24 * 60, Math.ceil(Math.max(21 * 60, ...timed.map(endOf)) / 60) * 60);
+
+    const line = document.createElement("div");
+    line.className = "tl";
+    line.style.height = ((to - from) / 60) * HOUR_PX + "px";
+    for (let m = from; m <= to; m += 60) {
+      const hr = document.createElement("div");
+      hr.className = "hr";
+      hr.style.top = ((m - from) / 60) * HOUR_PX + "px";
+      const label = document.createElement("span");
+      label.textContent = `${pad2(m / 60 % 24)}:00`;
+      hr.appendChild(label);
+      line.appendChild(hr);
+    }
+
+    // 時間重疊的並排：同一群重疊的行程平分寬度
+    const sorted = [...timed].sort((a, b) => startOf(a) - startOf(b));
+    let group = [], columns = [], groupEnd = -1;
+    const flush = () => {
+      for (const entry of group) entry.width = columns.length;
+      group = []; columns = [];
+    };
+    const placed = [];
+    for (const row of sorted) {
+      if (startOf(row) >= groupEnd) flush();
+      let col = columns.findIndex((end) => end <= startOf(row));
+      if (col < 0) { col = columns.length; columns.push(0); }
+      columns[col] = endOf(row);
+      groupEnd = Math.max(groupEnd, endOf(row));
+      const entry = { row, col, width: 1 };
+      group.push(entry);
+      placed.push(entry);
+    }
+    flush();
+
+    const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+    for (const { row, col, width } of placed) {
+      const block = document.createElement("button");
+      block.type = "button";
+      block.className = "blk";
+      if (selectedDay < todayKey || (selectedDay === todayKey && endOf(row) <= nowMin)) {
+        block.classList.add("past-blk");
+      }
+      block.style.top = ((startOf(row) - from) / 60) * HOUR_PX + 1 + "px";
+      block.style.height = Math.max(24, ((endOf(row) - startOf(row)) / 60) * HOUR_PX - 2) + "px";
+      block.style.left = `calc(${(col / width) * 100}% + 2px)`;
+      block.style.width = `calc(${100 / width}% - 4px)`;
+
+      const name = document.createElement("b");
+      name.textContent = row.title;
+      const time = document.createElement("small");
+      time.textContent = `${row.start.slice(11, 16)}–${row.end.slice(11, 16)}`;
+      block.append(name, time);
+      if (row.location) {
+        const place = document.createElement("small");
+        place.textContent = row.location;
+        block.appendChild(place);
+      }
+      block.onclick = () => show(row, block);
+      line.appendChild(block);
+    }
+
+    if (selectedDay === todayKey && nowMin >= from && nowMin <= to) {
+      const now = document.createElement("div");
+      now.className = "nowline";
+      now.style.top = ((nowMin - from) / 60) * HOUR_PX + "px";
+      line.appendChild(now);
+    }
+    card.appendChild(line);
+  }
+
+  const hint = document.createElement("div");
+  hint.className = "hint";
+  hint.textContent = "點一下行程可以修改或刪除";
+  wrap.append(hint, detail);
 }
 
 // --- 記帳 ---
@@ -735,11 +1087,23 @@ function renderExpenses(data) {
   if (!data.rows.length) return note("expense", "這個月還沒有紀錄", "上面可以記一筆。");
   hideNote("expense");
 
-  for (const row of data.rows) {
+  // 依日期分段，標頭右邊是那天的合計，一眼看出哪天花得多
+  const dayTotal = {};
+  for (const row of data.rows) dayTotal[row.date] = (dayTotal[row.date] || 0) + row.amount;
+  let lastDay = null;
+  // 新的在上面。sort 是穩定的，同一天之內維持後端給的順序
+  const byDate = [...data.rows].sort((a, b) => b.date.localeCompare(a.date));
+
+  for (const row of byDate) {
+    if (row.date !== lastDay) {
+      const when = new Date(row.date + "T00:00:00");
+      const days = Math.round((when - today0()) / 86400000);
+      const label = `${when.getMonth() + 1}/${when.getDate()}（${WEEK[when.getDay()]}）` +
+        (days === 0 ? " · 今天" : days === -1 ? " · 昨天" : "");
+      $("list-expense").appendChild(sectionHead(label, money(dayTotal[row.date])));
+      lastDay = row.date;
+    }
     const item = document.createElement("li");
-    const when = document.createElement("div");
-    when.className = "when";
-    when.textContent = row.date.slice(5).replace("-", "/");
 
     const body = document.createElement("div");
     body.className = "body";
@@ -748,10 +1112,17 @@ function renderExpenses(data) {
     title.textContent = row.item;
     const meta = document.createElement("div");
     meta.className = "meta";
-    meta.textContent = money(row.amount) + " · " + row.category;
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = row.category;
+    meta.appendChild(tag);
     body.append(title, meta);
 
-    item.append(when, body, smallButton("改", "edit", () => inlineEdit(item, [
+    const amount = document.createElement("div");
+    amount.className = "amt";
+    amount.textContent = money(row.amount);
+
+    item.append(body, amount, smallButton("改", "edit", () => inlineEdit(item, [
       { key: "item", type: "text", value: row.item, half: true, placeholder: "項目" },
       { key: "amount", type: "number", value: row.amount, half: true, placeholder: "金額" },
       { key: "category", type: "select", value: row.category, half: true, options: names },
@@ -1084,7 +1455,7 @@ $("search-expense").onsearch = searchExpenses;
 
 const LOADERS = {
   todo: async () => renderTodos(await api("/todos")),
-  event: async () => renderEvents(await api("/events")),
+  event: loadMonth,
   expense: async () => {
     renderExpenses(await api("/expenses"));
     await loadShortcuts();
@@ -1249,6 +1620,16 @@ wire("form-expense", ["expense-item", "expense-amount"], async () => {
   $("expense-item").value = "";
   $("expense-amount").value = "";
 });
+
+// 點進一行式的表單就展開其他欄位；離開時如果主欄位是空的就收回去。
+// 主欄位有字代表還在填，不收，免得選個日期就被收掉。
+for (const form of document.querySelectorAll(".composer")) {
+  const main = form.querySelector(".line input");
+  form.addEventListener("focusin", () => form.classList.add("open"));
+  form.addEventListener("focusout", () => setTimeout(() => {
+    if (!form.contains(document.activeElement) && !main.value.trim()) form.classList.remove("open");
+  }, 200));
+}
 
 // --- 啟動 ---
 

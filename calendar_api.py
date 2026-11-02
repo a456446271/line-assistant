@@ -65,7 +65,7 @@ def list_events(start: datetime, end: datetime) -> list[dict]:
             timeMax=end.isoformat(),
             singleEvents=True,
             orderBy="startTime",
-            maxResults=100,
+            maxResults=250,
         )
         .execute()
     )
@@ -79,7 +79,7 @@ def list_events(start: datetime, end: datetime) -> list[dict]:
         events.append(
             {
                 "id": item["id"],
-                "title": item.get("summary", "(無標題)"),
+                "title": item.get("summary") or "(無標題)",
                 "start": started,
                 "end": ended,
                 "all_day": all_day,

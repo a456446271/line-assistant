@@ -13,11 +13,13 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urlencode
 from datetime import date, datetime, time, timedelta
 
 import calendar_api
 import config
 import expense_api
+import line_api
 import sop_api
 import todo_api
 import zh_datetime
@@ -367,6 +369,51 @@ def _match_expense_add(text: str) -> AgentResult | None:
     )
 
 
+_RE_AMOUNT_ONLY = re.compile(r"^\s*[$＄]?\s*(?P<amount>\d{1,7})\s*(元|塊)?\s*$")
+
+
+def _match_amount_only(text: str) -> AgentResult | None:
+    """只打「120」：先不記，跳出常用項目讓使用者點一下決定記成什麼。
+
+    這條不會寫入任何東西，猜錯的代價只是多問一句，所以可以放心接。
+    真正寫入是在使用者點了按鈕之後（main.py 的 quick_expense postback）。
+    """
+    match = _RE_AMOUNT_ONLY.match(text)
+    if not match:
+        return None
+    amount = int(match.group("amount"))
+    if amount <= 0:
+        return None
+
+    today = _now().date()
+    try:
+        # 跟 LIFF 的快捷用同一份清單，兩邊看到的常用項目才會一樣
+        frequent = expense_api.frequent_items(
+            expense_api.query_expenses(today - timedelta(days=183), today)
+        )
+    except Exception:
+        frequent = []
+
+    # LINE 最多 13 顆按鈕。分類一定要全部在，什麼都才記得進去；
+    # 剩下的位置給常用項目，排在前面最好按。
+    room = max(0, 13 - len(config.CATEGORIES))
+    options: list[tuple[str, str]] = [
+        (row["item"], row["category"]) for row in frequent if row["item"] not in config.CATEGORIES
+    ][:room]
+    options += [(name, name) for name in config.CATEGORIES]
+
+    buttons = [
+        {
+            "label": item,
+            "data": "action=quick_expense&"
+            + urlencode({"amount": amount, "item": item, "category": category}),
+            "display": f"{item} {amount}",
+        }
+        for item, category in options[:13]
+    ]
+    return AgentResult(text=f"{_money(amount)} 要記成什麼？點下面的按鈕。", quick_replies=buttons)
+
+
 def _guess_category(item: str) -> str | None:
     lowered = item.lower()
     for category, keywords in _CATEGORY_KEYWORDS.items():
@@ -388,7 +435,12 @@ def _match_budget(text: str) -> AgentResult | None:
         f"（剩 {_money(budget - totals.get(name, 0))}）"
         for name, budget in config.BUDGETS.items()
     ]
-    return AgentResult(text="本月預算狀況：\n" + "\n".join(lines))
+    text = "本月預算狀況：\n" + "\n".join(lines)
+    if not config.BUDGETS:
+        return AgentResult(text=text)
+    return AgentResult(
+        text=text, card=line_api.budget_card(today.month, totals, config.BUDGETS, text)
+    )
 
 
 def _match_expense_query(text: str) -> AgentResult | None:
@@ -429,7 +481,8 @@ def _match_expense_query(text: str) -> AgentResult | None:
         f"・{name} {_money(amount)}"
         for name, amount in sorted(totals.items(), key=lambda kv: -kv[1])
     )
-    return AgentResult(text=f"{label}總共花了 {_money(total)}\n{detail}")
+    text = f"{label}總共花了 {_money(total)}\n{detail}"
+    return AgentResult(text=text, card=line_api.spending_card(label, totals, len(rows), text))
 
 
 def _match_free_slots(text: str) -> AgentResult | None:
@@ -477,7 +530,9 @@ def _match_calendar(text: str) -> AgentResult | None:
     if not events:
         return AgentResult(text=f"{label}沒有安排任何行程。")
 
-    return AgentResult(text=f"{label}的行程：\n{_fmt_events(events, start_day != end_day)}")
+    multi_day = start_day != end_day
+    text = f"{label}的行程：\n{_fmt_events(events, multi_day)}"
+    return AgentResult(text=text, card=line_api.schedule_card(label, events, multi_day, text))
 
 
 def _match_create_event(text: str) -> AgentResult | None:
@@ -522,6 +577,8 @@ _RULES = (
     _match_sop_add,
     # 指定分類的要排在關鍵字猜測前面，否則「餐飲 午餐 120」的項目
     # 會變成「餐飲 午餐」
+    # 只打金額：不寫入，只跳按鈕問要記成什麼
+    _match_amount_only,
     _match_expense_with_category,
     _match_expense_add,
     _match_budget,
